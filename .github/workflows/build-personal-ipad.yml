@@ -69,7 +69,7 @@ jobs:
         env:
           PERSONAL_IPAD_INSTALLER: "1"
           BUNDLE_ID: com.personaltools.installonipad
-          VERSION: "1.1.0"
+          VERSION: "1.1.1"
           BUILD_NUMBER: ${{ github.run_number }}
           OUTPUT: ${{ runner.temp }}/Install-on-iPad.ipa
         working-directory: ${{ runner.temp }}/sideinstaller
