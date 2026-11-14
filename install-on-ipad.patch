@@ -1,0 +1,1456 @@
+diff --git a/BUILD-INSTALL-ON-IPAD.md b/BUILD-INSTALL-ON-IPAD.md
+new file mode 100644
+index 0000000..2f88ac6
+--- /dev/null
++++ b/BUILD-INSTALL-ON-IPAD.md
+@@ -0,0 +1,38 @@
++# Install on iPad
++
++Private, non-commercial source build based on SideInstaller v2.0.1 (`50b2a0dea22d43659e2630e01daa9097145874cb`). SideInstaller by FrizzleM. See [upstream](https://github.com/FrizzleM/SideInstaller) and [the original license](LICENSE.md).
++
++## Build the unsigned IPA
++
++The source ZIP includes `.github/workflows/build-personal-ipad.yml`. Use a private GitHub repository with Actions and the `xcode-27` runner available. Extract the archive, publish the contents as the repository root on `main`, and open **Actions → Build Install on iPad**. The first push starts the build. Use **Run workflow** to retry. Download the `Install-on-iPad` artifact from the workflow run and extract `Install-on-iPad.ipa`. The simulator test step checks saved pairing records, Bonjour matching and the refresh archive.
++
++On an Apple Silicon Mac with Xcode 27.2 or newer, the iOS 27.2 or newer device SDK, XcodeGen and Rust, you can build the same unsigned IPA from a clean copy of this directory. The workflow selects a compatible Xcode explicitly and prints the Xcode build and SDK versions in the log.
++
++```bash
++PERSONAL_IPAD_INSTALLER=1 \
++BUNDLE_ID=com.personaltools.installonipad \
++VERSION=1.1.0 \
++OUTPUT=build/Install-on-iPad.ipa \
++bash scripts/build-ipa.sh
++```
++
++## Pair and install
++
++1. Sign and install `Install-on-iPad.ipa` with Signulous on the iPhone. Open the app on the iPhone and grant Local Network access when asked.
++2. Put both devices on the same Wi-Fi network with IPv4 enabled. Turn on Developer Mode on the iPad and keep it unlocked during the first install.
++3. Add the Apple Account that should sign apps for the iPad, choose an IPA, and tap **Install on iPad**. Approve the pairing code on the iPad under **Settings → Privacy & Security → Developer Mode**. Trust the signing account on the iPad if prompted.
++4. On later installs, choose an IPA and tap **Install on iPad** again. The app reconnects with the saved pairing record and uses Bonjour to look up the iPad when its previous address or port stops working. Unlock the iPad before retrying a failed connection. Use **Forget iPad** if the iPad has explicitly discarded the pairing or you want to switch devices.
++
++The iPhone’s Signulous registration is used for the installer. The Apple Account signs the IPAs for the iPad. With a free Apple Account, each profile expires after seven days and the three-app limit still applies.
++
++## Refresh and Increased Memory Limit
++
++Tap **Refresh** next to an app in **Refresh iPad apps**. The installer keeps a private copy of the original IPA on the iPhone. It uses the same Apple Account and checks the signed app identity before reinstalling over the existing app. The list shows the expiry from the issued profile. For an app installed before this build, choose its original IPA and install it again with the same signing account to add a refresh copy. Use the app’s options menu to remove the saved copy from the iPhone.
++
++Turn on **Request Increased Memory Limit** when choosing an IPA, or select **Refresh with Increased Memory Limit** from a saved app’s options. If Apple refuses the capability or the signed profile lacks it, the attempt stops before sending the app. The result reports when the profile grants it. Future refreshes request it again for that app. The toggle requests the capability when enabled. It leaves any capability already on the App ID in place when disabled. Actual memory availability depends on iPadOS and the device.
++
++## Changes and hardware checks
++
++This build opens straight to the IPA picker and saves one iPad pairing in the app’s private storage. It validates the saved iPad’s UDID before signing and again before transfer. An unsuccessful connection leaves the pairing in place. A successful transfer closes the tunnel and removes the staged copy of the selected IPA. The first pairing is saved before signing, so a sign-in failure can be retried without another PIN.
++
++After installing the dedicated build, test an initial transfer with a small IPA, force-quit and reopen the installer, then refresh the app. Confirm the app's data remains and check the updated profile expiry. Repeat with Increased Memory Limit and after the iPad gets a new IPv4 address. Device testing is required to confirm that iPadOS accepts the pairing after a reboot and that the Wi-Fi network forwards Bonjour announcements.
+diff --git a/ios-app/AccountViews.swift b/ios-app/AccountViews.swift
+index 81c8e0f..42f2a78 100644
+--- a/ios-app/AccountViews.swift
++++ b/ios-app/AccountViews.swift
+@@ -179,6 +179,7 @@ struct AccountEditor: View {
+     @Environment(\.dismiss) private var dismiss
+ 
+     let target: AccountEditorTarget
++    var isPersonalIPadBuild = false
+ 
+     @State private var email = ""
+     @State private var password = ""
+@@ -191,7 +192,7 @@ struct AccountEditor: View {
+     var body: some View {
+         NavigationStack {
+             // Someone who skipped first-run setup hasn't been asked yet.
+-            if confirmedOfficialSource || target.account != nil {
++            if isPersonalIPadBuild || confirmedOfficialSource || target.account != nil {
+                 form
+             } else {
+                 ScrollView {
+@@ -217,7 +218,7 @@ struct AccountEditor: View {
+         }
+         .onAppear {
+             if let account = target.account { email = account.appleID }
+-            guard confirmedOfficialSource || target.account != nil else { return }
++            guard isPersonalIPadBuild || confirmedOfficialSource || target.account != nil else { return }
+             focus = target.account == nil ? .email : .password
+         }
+     }
+diff --git a/ios-app/DeviceConnection.swift b/ios-app/DeviceConnection.swift
+index 116e0cb..701157f 100644
+--- a/ios-app/DeviceConnection.swift
++++ b/ios-app/DeviceConnection.swift
+@@ -269,7 +269,7 @@ final class DeviceConnection {
+     /// 127.0.0.1. Never from iOS 26.4 on, where no lockdown record gets through
+     /// (`Engine.canMintLockdownRecord`).
+     func connect(deviceIP: String, pairingFilePath: String, hostname: String = "SideInstaller",
+-                 allowLockdownMinting: Bool = true) throws {
++                 allowLockdownMinting: Bool = true, remotePairingPort: UInt16 = DeviceConnection.rsdPort) throws {
+         let kind = PairingFileKind.of(path: pairingFilePath)
+         guard kind.isUsable else {
+             throw fail("\((pairingFilePath as NSString).lastPathComponent) isn't a pairing file: it carries neither a remote-pairing key pair nor a lockdown pair record.")
+@@ -299,6 +299,7 @@ final class DeviceConnection {
+                     try connectRemotePairing(deviceIP: deviceIP,
+                                              pairingFilePath: pairingFilePath,
+                                              hostname: hostname,
++                                             port: remotePairingPort,
+                                              findsMovedPort: allowLockdownMinting)
+                 } else {
+                     try connectCoreDeviceProxy(deviceIP: deviceIP,
+@@ -346,7 +347,7 @@ final class DeviceConnection {
+     /// up and dialled too: the listener takes whatever port is free when it
+     /// starts (`NetworkStatus.ownRemotePairingAdvert`).
+     private func connectRemotePairing(deviceIP: String, pairingFilePath: String,
+-                                      hostname: String, findsMovedPort: Bool) throws {
++                                      hostname: String, port: UInt16, findsMovedPort: Bool) throws {
+         var pf: OpaquePointer?
+         try pairingFilePath.withCString { p in
+             try check(rp_pairing_file_read(p, &pf), "failed to read pairing file at \(pairingFilePath)")
+@@ -358,15 +359,15 @@ final class DeviceConnection {
+         // RSD address, loopback, then these local interface addresses, all
+         // within one shared timeout.
+         let candidates = NetworkStatus.tunnelHostCandidates()
+-        guard var failure = try dialRemotePairing(pairingFile, deviceIP: deviceIP, port: Self.rsdPort,
++        guard var failure = try dialRemotePairing(pairingFile, deviceIP: deviceIP, port: port,
+                                                   hostname: hostname, candidates: candidates) else { return }
+-        var port = Self.rsdPort
++        var attemptedPort = port
+         if findsMovedPort, failure.kind == TunnelFailureRsdUnreachable, Self.wasRefused(failure.raw) {
+             let advert = NetworkStatus.ownRemotePairingAdvert()
+             Engine.shared.log("Port \(port) refused. This iPhone's remote pairing advertisement: \(advert.summary).")
+             if let moved = advert.port, moved != port {
+                 Engine.shared.log("Dialling the advertised port \(moved) instead …")
+-                port = moved
++                attemptedPort = moved
+                 guard let retried = try dialRemotePairing(pairingFile, deviceIP: deviceIP, port: moved,
+                                                           hostname: hostname, candidates: candidates) else {
+                     Engine.shared.log("The tunnel opened on port \(moved).")
+@@ -378,7 +379,7 @@ final class DeviceConnection {
+         throw TunnelError(kind: failure.kind,
+                           advice: tunnelAdvice(kind: failure.kind,
+                                                deviceIP: deviceIP,
+-                                               port: port,
++                                               port: attemptedPort,
+                                                candidates: candidates,
+                                                raw: failure.raw),
+                           underlying: failure.raw)
+diff --git a/ios-app/IPadRefreshStore.swift b/ios-app/IPadRefreshStore.swift
+new file mode 100644
+index 0000000..218534e
+--- /dev/null
++++ b/ios-app/IPadRefreshStore.swift
+@@ -0,0 +1,73 @@
++import Foundation
++
++struct IPadRefreshApp: Codable, Identifiable, Equatable {
++    let archiveID: UUID
++    let deviceID: String
++    let applicationID: String
++    let bundleID: String
++    let appleID: String
++    let name: String
++    let version: String?
++    let increasedMemory: Bool
++    let expirationDate: Date?
++
++    var id: UUID { archiveID }
++}
++
++/// Keeps the original IPA so signing again produces the same bundle identity.
++/// A new archive is committed to the index before its predecessor is removed.
++struct IPadRefreshStore {
++    static let memoryEntitlement = "com.apple.developer.kernel.increased-memory-limit"
++    var directory: URL = PrivateStore.iPadRefreshDirectory
++    private var index: URL { directory.appendingPathComponent("index.json") }
++
++    func archive(for app: IPadRefreshApp) -> URL {
++        directory.appendingPathComponent(app.archiveID.uuidString).appendingPathExtension("ipa")
++    }
++
++    func load() throws -> [IPadRefreshApp] {
++        do {
++            return try JSONDecoder().decode([IPadRefreshApp].self, from: Data(contentsOf: index))
++        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
++            return []
++        }
++    }
++
++    func save(_ app: IPadRefreshApp, originalIPA: URL?) throws -> [IPadRefreshApp] {
++        let previous = try load()
++        let matching = previous.filter {
++            $0.deviceID.caseInsensitiveCompare(app.deviceID) == .orderedSame && $0.applicationID == app.applicationID
++        }
++        let updated = [app] + previous.filter { !matching.contains($0) }
++        let disk = FileManager.default
++        try disk.createDirectory(at: directory, withIntermediateDirectories: true)
++        let destination = archive(for: app)
++        if let originalIPA {
++            // Stage a fresh archive out of sight of the index until the copy
++            // succeeds, so updates and failed transfers leave the old IPA intact.
++            let staging = directory.appendingPathComponent(UUID().uuidString + ".partial")
++            defer { try? disk.removeItem(at: staging) }
++            try disk.copyItem(at: originalIPA, to: staging)
++            try disk.moveItem(at: staging, to: destination)
++        }
++        do {
++            try JSONEncoder().encode(updated).write(to: index, options: .atomic)
++        } catch {
++            if originalIPA != nil { try? disk.removeItem(at: destination) }
++            throw error
++        }
++        // Removing previous copies after the index write also makes new installs
++        // over the same app use the most recently installed IPA on refresh.
++        for old in matching where old.archiveID != app.archiveID {
++            try? disk.removeItem(at: archive(for: old))
++        }
++        return updated
++    }
++
++    func remove(_ app: IPadRefreshApp) throws -> [IPadRefreshApp] {
++        let updated = try load().filter { $0.id != app.id }
++        try JSONEncoder().encode(updated).write(to: index, options: .atomic)
++        try? FileManager.default.removeItem(at: archive(for: app))
++        return updated
++    }
++}
+diff --git a/ios-app/NetworkStatus.swift b/ios-app/NetworkStatus.swift
+index 82498fa..857148f 100644
+--- a/ios-app/NetworkStatus.swift
++++ b/ios-app/NetworkStatus.swift
+@@ -296,6 +296,11 @@ enum NetworkStatus {
+         interfaces().contains { $0.ipv4 == deviceIP }
+     }
+ 
++    static func isOnWiFiSubnet(_ address: String) -> Bool {
++        guard let target = ipv4Value(address) else { return false }
++        return interfaces().contains { $0.name == "en0" && subnet($0, contains: target) }
++    }
++
+     /// Extra local addresses to try when the device's tunnel listener gives a
+     /// port but no host. Wi-Fi (`en0`) first, since remote pairing runs over it.
+     /// Loopback and tunnel interfaces are excluded; they're already tried.
+diff --git a/ios-app/PairingController.swift b/ios-app/PairingController.swift
+index 8e09483..69b429b 100644
+--- a/ios-app/PairingController.swift
++++ b/ios-app/PairingController.swift
+@@ -119,6 +119,7 @@ final class PairingController {
+         let path: String
+         let deviceName: String
+         let deviceModel: String
++        let udid: String
+         /// The address it connected from: its IP on this network.
+         let address: String
+     }
+@@ -387,7 +388,7 @@ final class PairingController {
+                 // The merged file is now stale; the cached lockdown record is kept.
+                 CompositePairingFile.invalidateMerged()
+                 overSettings.finish(paired: true)
+-                resolve(run, .success(PairedDevice(path: path, deviceName: name, deviceModel: model,
++                resolve(run, .success(PairedDevice(path: path, deviceName: name, deviceModel: model, udid: udid,
+                                                    address: address)))
+             }
+         case let .failure(message):
+@@ -408,7 +409,7 @@ final class PairingController {
+             if size == 0 {
+                 resolve(run, .failure(PairingError.zeroBytes))
+             } else {
+-                resolve(run, .success(PairedDevice(path: path, deviceName: name, deviceModel: model,
++                resolve(run, .success(PairedDevice(path: path, deviceName: name, deviceModel: model, udid: udid,
+                                                    address: address)))
+             }
+         case let .failure(message):
+diff --git a/ios-app/PersonalIPadView.swift b/ios-app/PersonalIPadView.swift
+new file mode 100644
+index 0000000..106fc2d
+--- /dev/null
++++ b/ios-app/PersonalIPadView.swift
+@@ -0,0 +1,265 @@
++import SwiftUI
++
++struct PersonalIPadView: View {
++    @Environment(Engine.self) private var engine
++    @EnvironmentObject private var accounts: AccountStore
++    @StateObject private var manager = SideBySideManager(personalIPadMode: true)
++    @State private var pickingIPA = false
++    @State private var confirmingForget = false
++    @State private var removingRefreshCopy: IPadRefreshApp?
++    @State private var editingAccount: AccountEditorTarget?
++    @State private var shownTwoFactor: TwoFactorPhase?
++
++    var body: some View {
++        NavigationStack {
++            ScrollView {
++                VStack(alignment: .leading, spacing: 20) {
++                    targetCard
++                    if manager.isRunning {
++                        progressCard
++                        if manager.pairingInSettings { pairingCard }
++                    } else if manager.finished {
++                        successCard
++                    } else {
++                        installControls
++                    }
++                    if !manager.isRunning && !manager.appsForRememberedIPad.isEmpty {
++                        refreshControls
++                    }
++                    if let notice = manager.refreshNotice {
++                        Label(notice, systemImage: "exclamationmark.circle")
++                            .foregroundStyle(Theme.warning)
++                    }
++                }
++                .padding(20)
++                .pageColumn()
++            }
++            .background(AppBackground())
++            .navigationTitle("Install on iPad")
++            .navigationBarTitleDisplayMode(.inline)
++        }
++        .sheet(isPresented: $pickingIPA) {
++            FileImporterRepresentableView(allowedContentTypes: [.ipa]) { urls in
++                guard let url = urls.first else { return }
++                importIPA(url)
++            }
++            .ignoresSafeArea()
++        }
++        .sheet(item: $editingAccount) { target in
++            AccountEditor(target: target, isPersonalIPadBuild: true)
++        }
++        .sheet(isPresented: Binding(
++            get: { engine.twoFactor != nil },
++            set: { if !$0, let phase = engine.twoFactor { engine.cancelTwoFactor(phase) } }
++        )) {
++            if let phase = engine.twoFactor ?? shownTwoFactor {
++                TwoFactorSheet(phase: phase)
++            }
++        }
++        .onChange(of: engine.twoFactor) { _, phase in
++            if let phase { shownTwoFactor = phase }
++        }
++        .onChange(of: accounts.revision) { _, _ in manager.signOut() }
++        .onOpenURL { url in
++            guard url.isFileURL, url.pathExtension.lowercased() == "ipa" else { return }
++            importIPA(url)
++        }
++        .alert("Forget this iPad?", isPresented: $confirmingForget) {
++            Button("Forget iPad", role: .destructive) { manager.forgetIPad() }
++            Button("Cancel", role: .cancel) {}
++        } message: {
++            Text("You’ll approve a new pairing on the iPad before the next install.")
++        }
++        .alert("Remove saved IPA?", isPresented: Binding(
++            get: { removingRefreshCopy != nil },
++            set: { if !$0 { removingRefreshCopy = nil } }
++        ), presenting: removingRefreshCopy) { app in
++            Button("Remove Saved IPA", role: .destructive) {
++                manager.removeIPadRefreshCopy(app)
++                removingRefreshCopy = nil
++            }
++            Button("Cancel", role: .cancel) {}
++        } message: { app in
++            Text("This frees up space on the iPhone. To refresh \(app.name) later, choose its IPA and install it again.")
++        }
++    }
++
++    private func importIPA(_ url: URL) {
++        guard !manager.isRunning else { return }
++        manager.prepareAnotherIPadInstall()
++        Task { await manager.importCustomIPA(from: url) }
++    }
++
++    private var targetCard: some View {
++        PanelCard {
++            VStack(alignment: .leading, spacing: 10) {
++                Label(manager.rememberedIPad?.name ?? "Pair your iPad", systemImage: "ipad")
++                    .font(.headline)
++                if manager.rememberedIPad != nil {
++                    Text("Pairing saved")
++                        .foregroundStyle(.secondary)
++                    if !manager.isRunning {
++                        Button("Forget iPad", role: .destructive) { confirmingForget = true }
++                    }
++                } else {
++                    Text("Keep both devices on the same Wi-Fi and turn on Developer Mode on the iPad. You’ll approve a pairing code during the first install.")
++                        .foregroundStyle(.secondary)
++                }
++            }
++            .frame(maxWidth: .infinity, alignment: .leading)
++        }
++    }
++
++    private var installControls: some View {
++        VStack(alignment: .leading, spacing: 14) {
++            Button {
++                pickingIPA = true
++            } label: {
++                Label(manager.customIPA.map { $0.file.lastPathComponent } ?? "Choose IPA",
++                      systemImage: "doc.zipper")
++                    .lineLimit(1)
++                    .truncationMode(.middle)
++            }
++            .buttonStyle(SecondaryButtonStyle())
++            .disabled(manager.isImportingIPA)
++
++            Button {
++                editingAccount = accounts.active.map(AccountEditorTarget.existing) ?? .new
++            } label: {
++                Label(accounts.active?.normalized ?? "Add signing Apple Account", systemImage: "person.crop.circle")
++            }
++            .buttonStyle(SecondaryButtonStyle())
++
++            if manager.customIPA != nil {
++                Toggle("Request Increased Memory Limit", isOn: $manager.requestIncreasedMemory)
++            }
++
++            if manager.isImportingIPA { ProgressView("Importing IPA…") }
++            if let message = manager.lastError ?? manager.importError {
++                Label(message, systemImage: "exclamationmark.circle")
++                    .foregroundStyle(Theme.warning)
++                    .fixedSize(horizontal: false, vertical: true)
++            }
++
++            Button("Install on iPad") { manager.start() }
++                .buttonStyle(PrimaryButtonStyle())
++                .disabled(manager.customIPA == nil || manager.isImportingIPA || !manager.hasCredentials)
++        }
++    }
++
++    private var refreshControls: some View {
++        PanelCard {
++            VStack(alignment: .leading, spacing: 12) {
++                Text("Refresh iPad apps").font(.headline)
++                ForEach(manager.appsForRememberedIPad) { app in
++                    ViewThatFits(in: .horizontal) {
++                        HStack {
++                            refreshDetails(app)
++                            Spacer(minLength: 12)
++                            refreshActions(app)
++                        }
++                        VStack(alignment: .leading, spacing: 8) {
++                            refreshDetails(app)
++                            refreshActions(app)
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    private func refreshDetails(_ app: IPadRefreshApp) -> some View {
++        VStack(alignment: .leading, spacing: 4) {
++            Text(app.name).font(.subheadline.weight(.medium))
++            if let date = app.expirationDate {
++                Text(date <= Date() ? "Expired \(date.formatted(date: .abbreviated, time: .shortened))"
++                     : "Expires \(date.formatted(date: .abbreviated, time: .shortened))")
++                    .font(.caption).foregroundStyle(.secondary)
++            }
++            if app.increasedMemory {
++                Text("Increased Memory Limit").font(.caption).foregroundStyle(.secondary)
++            }
++        }
++    }
++
++    private func refreshActions(_ app: IPadRefreshApp) -> some View {
++        HStack(spacing: 8) {
++            Button { manager.start(refreshing: app) } label: {
++                Label("Refresh", systemImage: "arrow.clockwise").fixedSize()
++            }
++            .buttonStyle(.bordered)
++            .disabled(!manager.hasCredentials || manager.isImportingIPA)
++            .accessibilityLabel("Refresh \(app.name)")
++
++            Menu {
++                if !app.increasedMemory {
++                    Button("Refresh with Increased Memory Limit") {
++                        manager.start(refreshing: app, requiringIncreasedMemory: true)
++                    }
++                    .disabled(!manager.hasCredentials || manager.isImportingIPA)
++                }
++                Button("Remove Saved IPA", role: .destructive) { removingRefreshCopy = app }
++            } label: {
++                Image(systemName: "ellipsis.circle").padding(6)
++            }
++            .accessibilityLabel("Options for \(app.name)")
++        }
++    }
++
++    private var progressCard: some View {
++        PanelCard {
++            VStack(alignment: .leading, spacing: 12) {
++                ProgressView(value: manager.overallProgress) {
++                    Text(manager.isCancelling ? "Cancelling…"
++                         : manager.refreshingIPadApp ? "Refreshing \(manager.runName)" : "Installing \(manager.runName)")
++                }
++                if let step = manager.runSteps.first(where: {
++                    manager.stepStates[$0] == .active || manager.stepStates[$0] == .waiting
++                }) {
++                    Text(step == .connect ? "Connecting to your iPad"
++                         : step == .install ? "Sending the app to your iPad"
++                         : step.title(for: manager.runApp))
++                        .foregroundStyle(.secondary)
++                }
++                Button("Cancel", role: .cancel) { manager.cancel() }
++                    .disabled(manager.isCancelling)
++            }
++        }
++    }
++
++    private var pairingCard: some View {
++        PanelCard {
++            VStack(alignment: .leading, spacing: 12) {
++                Text("Approve pairing on your iPad").font(.headline)
++                Text("Open Settings → Privacy & Security → Developer Mode. Tap ‘Pair with \(PairingController.peerHostName)’ and enter the code shown here.")
++                    .foregroundStyle(.secondary)
++                if let pin = manager.pairingPIN {
++                    PairingCodeDigits(pin: pin)
++                }
++            }
++        }
++    }
++
++    private var successCard: some View {
++        let name = manager.installedAppName ?? manager.runName
++        return PanelCard {
++            VStack(alignment: .leading, spacing: 12) {
++                Label(manager.refreshingIPadApp ? "\(name) refreshed" : "\(name) installed",
++                      systemImage: "checkmark.circle")
++                    .font(.headline)
++                if manager.installedWithIncreasedMemory == true {
++                    Text("Increased Memory Limit granted").foregroundStyle(.secondary)
++                }
++                if !manager.refreshingIPadApp {
++                    Text("If iPadOS asks you to trust the signing account, open Settings → General → VPN & Device Management on the iPad.")
++                        .foregroundStyle(.secondary)
++                }
++                Button("Install another IPA") {
++                    manager.prepareAnotherIPadInstall()
++                    pickingIPA = true
++                }
++                .buttonStyle(PrimaryButtonStyle())
++            }
++        }
++    }
++}
+diff --git a/ios-app/RememberedIPad.swift b/ios-app/RememberedIPad.swift
+new file mode 100644
+index 0000000..4a44c5c
+--- /dev/null
++++ b/ios-app/RememberedIPad.swift
+@@ -0,0 +1,158 @@
++import Darwin
++import Foundation
++import SideInstallerFFI
++
++/// A single explicitly approved target. Keep metadata in the same atomic
++/// write as the Remote Pairing record so an interrupted save cannot mix peers.
++struct RememberedIPad {
++    let udid: String
++    let name: String
++    let address: String
++    let port: UInt16
++    let discoveryKey: Data
++
++    private static let metadataKey = "SideInstallerRememberedIPad"
++
++    static func read(from file: URL = PrivateStore.rememberedIPadPairing) throws -> Self {
++        let plist = try dictionary(at: file)
++        guard let metadata = plist[metadataKey] as? [String: String],
++              let udid = metadata["udid"], !udid.isEmpty,
++              let name = metadata["name"], let address = metadata["address"],
++              let key = plist["alt_irk"] as? Data, key.count == 16 else {
++            throw CocoaError(.fileReadCorruptFile)
++        }
++        let port = metadata["port"].flatMap { UInt16($0) } ?? DeviceConnection.rsdPort
++        guard port > 0 else { throw CocoaError(.fileReadCorruptFile) }
++        return Self(udid: udid, name: name, address: address, port: port, discoveryKey: key)
++    }
++
++    static func save(record: URL, to file: URL = PrivateStore.rememberedIPadPairing,
++                     udid: String, name: String, address: String,
++                     port: UInt16 = DeviceConnection.rsdPort) throws -> Self {
++        var plist = try dictionary(at: record)
++        guard !udid.isEmpty, port > 0, let key = plist["alt_irk"] as? Data, key.count == 16 else {
++            throw CocoaError(.fileReadCorruptFile)
++        }
++        plist[metadataKey] = ["udid": udid, "name": name, "address": address, "port": String(port)]
++        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
++        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
++        return Self(udid: udid, name: name, address: address, port: port, discoveryKey: key)
++    }
++
++    private static func dictionary(at file: URL) throws -> [String: Any] {
++        let data = try Data(contentsOf: file)
++        guard PairingFileKind.of(data: data).hasRemotePairing,
++              let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
++            throw CocoaError(.fileReadCorruptFile)
++        }
++        return plist
++    }
++
++    func matches(identifier: String, tag: String) -> Bool {
++        discoveryKey.withUnsafeBytes { raw in
++            identifier.withCString { identifier in
++                tag.withCString { tag in
++                    si_pairing_matches_advert(raw.bindMemory(to: UInt8.self).baseAddress, identifier, tag)
++                }
++            }
++        }
++    }
++}
++
++struct IPadEndpoint: Equatable, Sendable {
++    let address: String
++    let port: UInt16
++}
++
++/// Find the paired iPad at its current IPv4 address and advertised port. The
++/// device's identity is checked again after the trusted tunnel opens.
++private final class IPadDiscovery: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
++    private let peer: RememberedIPad
++    private let browser = NetServiceBrowser()
++    private var resolving: [NetService] = []
++    private var completion: (([IPadEndpoint]) -> Void)?
++
++    init(peer: RememberedIPad) { self.peer = peer }
++
++    @MainActor
++    static func find(_ peer: RememberedIPad) async -> [IPadEndpoint] {
++        let discovery = IPadDiscovery(peer: peer)
++        return await withTaskCancellationHandler {
++            await withCheckedContinuation { continuation in
++                guard !Task.isCancelled else { continuation.resume(returning: []); return }
++                discovery.start { continuation.resume(returning: $0) }
++            }
++        } onCancel: {
++            DispatchQueue.main.async { discovery.finish([]) }
++        }
++    }
++
++    private func start(_ completion: @escaping ([IPadEndpoint]) -> Void) {
++        self.completion = completion
++        browser.delegate = self
++        browser.remove(from: .main, forMode: .default)
++        browser.schedule(in: .main, forMode: .common)
++        browser.searchForServices(ofType: "_remotepairing._tcp.", inDomain: "local.")
++        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.finish([]) }
++    }
++
++    private func finish(_ endpoints: [IPadEndpoint]) {
++        guard let completion else { return }
++        self.completion = nil
++        browser.delegate = nil
++        browser.stop()
++        for service in resolving {
++            service.delegate = nil
++            service.stopMonitoring()
++            service.stop()
++        }
++        resolving.removeAll()
++        completion(endpoints)
++    }
++
++    func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
++        resolving.append(service)
++        service.delegate = self
++        service.remove(from: .main, forMode: .default)
++        service.schedule(in: .main, forMode: .common)
++        service.resolve(withTimeout: 2)
++    }
++
++    func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
++        finish([])
++    }
++
++    func netServiceDidResolveAddress(_ service: NetService) {
++        if let data = service.txtRecordData() { resolve(service, withTXTRecord: data) }
++        if completion != nil { service.startMonitoring() }
++    }
++
++    func netService(_ service: NetService, didUpdateTXTRecord data: Data) {
++        resolve(service, withTXTRecord: data)
++    }
++
++    private func resolve(_ service: NetService, withTXTRecord data: Data) {
++        guard let port = UInt16(exactly: service.port), port != 0 else { return }
++        let txt = NetService.dictionary(fromTXTRecord: data)
++        let record = Dictionary(txt.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { first, _ in first })
++        guard let identifier = record["identifier"].flatMap({ String(data: $0, encoding: .utf8) }),
++              let tag = record["authtag"].flatMap({ String(data: $0, encoding: .utf8) }),
++              peer.matches(identifier: identifier, tag: tag) else { return }
++        let endpoints: [IPadEndpoint] = (service.addresses ?? []).compactMap { data in
++            data.withUnsafeBytes { raw in
++                guard let base = raw.baseAddress, raw.count >= MemoryLayout<sockaddr_in>.size else { return nil }
++                let socket = base.assumingMemoryBound(to: sockaddr.self)
++                guard Int32(socket.pointee.sa_family) == AF_INET,
++                      let host = NetworkStatus.numericHost(socket, length: socklen_t(raw.count)),
++                      NetworkStatus.isOnWiFiSubnet(host), !NetworkStatus.isOwnAddress(host) else { return nil }
++                return IPadEndpoint(address: host, port: port)
++            }
++        }
++        if !endpoints.isEmpty { finish(endpoints) }
++    }
++}
++
++extension RememberedIPad {
++    @MainActor
++    func discover() async -> [IPadEndpoint] { await IPadDiscovery.find(self) }
++}
+diff --git a/ios-app/SideBySideView.swift b/ios-app/SideBySideView.swift
+index b76f1b8..95177ca 100644
+--- a/ios-app/SideBySideView.swift
++++ b/ios-app/SideBySideView.swift
+@@ -298,6 +298,15 @@ final class SideBySideManager: ObservableObject {
+     @Published private(set) var lastError: String?
+     /// True while a pair record with someone else's iPhone is saved here.
+     @Published private(set) var remembersTheirIPhone = PrivateStore.hasPeerPairings
++    @Published private(set) var rememberedIPad: RememberedIPad?
++    @Published private(set) var refreshApps: [IPadRefreshApp] = []
++    @Published private(set) var refreshNotice: String?
++    @Published private(set) var refreshingIPadApp = false
++    @Published private(set) var installedWithIncreasedMemory: Bool?
++    @Published var requestIncreasedMemory = false
++    private let personalIPadMode: Bool
++    private let refreshStore = IPadRefreshStore()
++    private var remotePairingPort = DeviceConnection.rsdPort
+ 
+     private var task: Task<Void, Never>?
+ 
+@@ -346,7 +355,18 @@ final class SideBySideManager: ObservableObject {
+         let folder: URL
+     }
+ 
+-    init() {
++    init(personalIPadMode: Bool = false) {
++        self.personalIPadMode = personalIPadMode
++        if personalIPadMode {
++            rememberedIPad = try? RememberedIPad.read()
++            do {
++                refreshApps = try refreshStore.load()
++            } catch {
++                refreshNotice = "Couldn’t load saved refresh copies. \(error.localizedDescription)"
++            }
++            usesSavedAccount = true
++            app = .custom
++        }
+         // Left with someone's signing key in it if SideInstaller was closed
+         // before a run ended.
+         PrivateStore.forgetEarlierPeerSignIns()
+@@ -415,6 +435,24 @@ final class SideBySideManager: ObservableObject {
+         go(to: .welcome)
+     }
+ 
++    @MainActor
++    func forgetIPad() {
++        guard personalIPadMode, !isRunning else { return }
++        do {
++            try FileManager.default.removeItem(at: PrivateStore.rememberedIPadPairing)
++        } catch let error as CocoaError where error.code == .fileNoSuchFile {
++            // The record was already removed.
++        } catch {
++            finished = false
++            lastError = "Couldn’t forget this iPad. \(short(error))"
++            return
++        }
++        disconnectTheirIPhone()
++        rememberedIPad = nil
++        pairRecordPath = nil
++        resetRun()
++    }
++
+     // MARK: - Derived
+ 
+     /// The address typed in, when they said they have it; nil otherwise, and
+@@ -462,6 +500,17 @@ final class SideBySideManager: ObservableObject {
+ 
+     var hasCredentials: Bool { credentials != nil }
+ 
++    var appsForRememberedIPad: [IPadRefreshApp] {
++        guard let device = rememberedIPad else { return [] }
++        return refreshApps.filter { $0.deviceID.caseInsensitiveCompare(device.udid) == .orderedSame }
++    }
++
++    @MainActor
++    func prepareAnotherIPadInstall() {
++        guard personalIPadMode, !isRunning else { return }
++        resetRun()
++    }
++
+     /// Fraction across the run's steps, for the progress bar. The download and
+     /// install steps also fill their own share as they go.
+     var overallProgress: Double {
+@@ -478,8 +527,12 @@ final class SideBySideManager: ObservableObject {
+     /// Starts the run from the summary, or again after it stopped. Checks what
+     /// it can first, and says why it can't start instead of starting.
+     @MainActor
+-    func start() {
+-        guard !isRunning else { return }
++    func start(refreshing saved: IPadRefreshApp? = nil, requiringIncreasedMemory: Bool = false) {
++        guard !isRunning, !isImportingIPA else { return }
++        if personalIPadMode {
++            resetRun()
++            refreshNotice = nil
++        }
+         if let problem = addressProblem {
+             lastError = ErrorHelp.explained(problem)
+             return
+@@ -488,17 +541,36 @@ final class SideBySideManager: ObservableObject {
+             lastError = ErrorHelp.explained(L("Enter the Apple ID to sign with, and its password."))
+             return
+         }
++        let app = saved == nil ? self.app : .custom
++        let custom: CustomIPA?
++        if let saved {
++            guard personalIPadMode, appsForRememberedIPad.contains(saved) else { return }
++            guard saved.appleID.caseInsensitiveCompare(credentials.id) == .orderedSame else {
++                lastError = "Use the same Apple Account that installed \(saved.name) to refresh it."
++                return
++            }
++            let file = refreshStore.archive(for: saved)
++            guard FileManager.default.fileExists(atPath: file.path) else {
++                lastError = "The saved IPA for \(saved.name) is missing. Choose the original IPA and install it again."
++                return
++            }
++            custom = CustomIPA(file: file, name: saved.name, version: saved.version, build: nil)
++        } else {
++            custom = app == .custom ? customIPA : nil
++        }
+         if app == .custom {
+             // iOS may clear the temporary folder it was copied into.
+-            guard let picked = customIPA, FileManager.default.fileExists(atPath: picked.file.path) else {
+-                if customIPA != nil { discardCustomIPA() }
++            guard let picked = custom, FileManager.default.fileExists(atPath: picked.file.path) else {
++                if saved == nil, customIPA != nil { discardCustomIPA() }
+                 lastError = ErrorHelp.explained(L("Pick an .ipa to install."))
+                 return
+             }
+         }
+         engine.refreshNetworkStatus()
+         guard engine.wifiConnected else {
+-            lastError = ErrorHelp.explained(L("Wi-Fi is off. Both iPhones have to be on the same Wi-Fi network for this to work."))
++            lastError = ErrorHelp.explained(personalIPadMode
++                ? "Connect your iPhone and iPad to the same Wi-Fi network."
++                : L("Wi-Fi is off. Both iPhones have to be on the same Wi-Fi network for this to work."))
+             return
+         }
+         // A different Apple ID than the session was opened with invalidates it.
+@@ -506,13 +578,13 @@ final class SideBySideManager: ObservableObject {
+             signOut()
+         }
+ 
+-        let app = self.app
+         // AltStore has a stable channel only, whatever was picked for another.
+         let offered = app.source?.channels(stableReleased: true) ?? ReleaseChannel.allCases
+         let channel = offered.contains(self.channel) ? self.channel : offered[0]
+-        let custom = app == .custom ? customIPA : nil
+         let setsUp: SideBySideApp? = custom != nil ? custom?.build : app
++        let memory = personalIPadMode && (requiringIncreasedMemory || (saved?.increasedMemory ?? requestIncreasedMemory))
+         resetRun()
++        refreshingIPadApp = saved != nil
+         runApp = app
+         runName = custom?.name ?? app.displayName
+         runSetsUp = setsUp
+@@ -536,12 +608,40 @@ final class SideBySideManager: ObservableObject {
+         task = Task { @MainActor in
+             do {
+                 await ensureLocalNetwork()
+-                let address = try await connectToTarget(app: app)
++                let address: String
++                if personalIPadMode {
++                    address = try await connectToPersonalIPad()
++                } else {
++                    address = try await connectToTarget(app: app)
++                }
+                 if let setsUp { try checkCompatibility(of: setsUp) }
+                 try await signIn(id: credentials.id, pw: credentials.password)
+                 try await download(app, channel: channel, custom: custom)
+-                try await signApp(app)
+-                try await install(ip: address)
++                try await signApp(app, increasedMemory: memory)
++                let profile = personalIPadMode ? signedIPadProfile() : nil
++                if memory {
++                    guard let profile else {
++                        throw EngineError.message("Couldn’t verify whether Apple’s signing profile granted Increased Memory Limit.")
++                    }
++                    guard (profile.entitlements[IPadRefreshStore.memoryEntitlement] as? Bool) == true else {
++                        throw EngineError.message("Apple’s signing profile did not grant Increased Memory Limit for this app.")
++                    }
++                }
++                if let saved {
++                    guard let profile else {
++                        throw EngineError.message("Couldn’t verify the new signing profile for \(saved.name).")
++                    }
++                    guard signedBundleID == saved.bundleID, profile.applicationIdentifier == saved.applicationID else {
++                        throw EngineError.message("The refreshed signature does not match \(saved.name)’s existing app ID. Check the signing Apple Account.")
++                    }
++                }
++                try await install(ip: address, refreshingBundleID: saved?.bundleID)
++                if let profile, let custom {
++                    installedWithIncreasedMemory = profile.entitlements[IPadRefreshStore.memoryEntitlement] as? Bool == true
++                    await recordIPadInstall(custom: custom, profile: profile, appleID: credentials.id, refreshing: saved)
++                } else if personalIPadMode {
++                    refreshNotice = "The app installed, but its signing profile couldn’t be read to set up Refresh."
++                }
+                 if let setsUp { try await setUp(setsUp, ip: address, appleID: credentials.id) }
+                 finishSuccess()
+             } catch let error where error is CancellationError || Task.isCancelled {
+@@ -558,6 +658,17 @@ final class SideBySideManager: ObservableObject {
+                 engine.log("⛔️ Side by Side stopped: \(message)")
+                 failActiveStep(to: .failed)
+             }
++            if personalIPadMode {
++                disconnectTheirIPhone()
++                // Ask the signer to revalidate its saved Apple session next
++                // time. The app may be left running past the token's expiry.
++                signOut()
++                if let custom {
++                    let extracted = FileManager.default.temporaryDirectory
++                        .appendingPathComponent(custom.file.lastPathComponent + "_extracted", isDirectory: true)
++                    try? FileManager.default.removeItem(at: extracted)
++                }
++            }
+             pairingInSettings = false
+             pairingPIN = nil
+             setTrustWait(false)
+@@ -665,6 +776,8 @@ final class SideBySideManager: ObservableObject {
+         downloadProgress = 0
+         lastError = nil
+         finished = false
++        refreshingIPadApp = false
++        installedWithIncreasedMemory = nil
+         pairingInSettings = false
+         pairingPIN = nil
+         setTrustWait(false)
+@@ -691,6 +804,11 @@ final class SideBySideManager: ObservableObject {
+     @MainActor
+     private func finishSuccess() {
+         finished = true
++        if personalIPadMode {
++            if !refreshingIPadApp { discardCustomIPA() }
++            discardDownload()
++            return
++        }
+         let name = installedAppName ?? runName
+         engine.log("✅ Side by Side done: \(name) is on their iPhone. One trust step left, on their side.")
+         // Theirs pairs itself and signs itself in, or SideStore now holds the
+@@ -813,6 +931,102 @@ final class SideBySideManager: ObservableObject {
+ 
+     // MARK: - Step 1: pair with the target and open the link
+ 
++    @MainActor
++    private func connectToPersonalIPad() async throws -> String {
++        try Task.checkCancellation()
++        setStep(.connect, .active)
++        let savedRecord = PrivateStore.rememberedIPadPairing
++        let savedPeer: RememberedIPad
++        if let rememberedIPad {
++            savedPeer = rememberedIPad
++        } else {
++            let pending = FileManager.default.temporaryDirectory
++                .appendingPathComponent("ipad-pair-\(UUID().uuidString).plist")
++            defer { try? FileManager.default.removeItem(at: pending) }
++            let paired = try await pairFromSettings(record: pending, identifier: UUID().uuidString.lowercased())
++            guard paired.deviceModel.hasPrefix("iPad"), !paired.udid.isEmpty,
++                  NetworkStatus.isOnWiFiSubnet(paired.address), !NetworkStatus.isOwnAddress(paired.address) else {
++                throw EngineError.message("Pair from your iPad’s Developer Mode settings while both devices are on the same Wi-Fi network.")
++            }
++            savedPeer = try RememberedIPad.save(record: pending, udid: paired.udid,
++                                              name: paired.deviceName, address: paired.address)
++            rememberedIPad = savedPeer
++        }
++
++        var target: (ConnectedTarget, IPadEndpoint)?
++        var lastTunnelError: Error?
++        let lastAddress = IPadEndpoint(address: savedPeer.address, port: savedPeer.port)
++        if NetworkStatus.isOnWiFiSubnet(lastAddress.address), !NetworkStatus.isOwnAddress(lastAddress.address) {
++            do {
++                target = try await openIPad(savedPeer, at: [lastAddress], record: savedRecord)
++            } catch {
++                lastTunnelError = error
++            }
++        }
++        var foundSavedIPad = false
++        if target == nil {
++            try Task.checkCancellation()
++            let endpoints = await savedPeer.discover()
++            if !endpoints.isEmpty {
++                foundSavedIPad = true
++                do {
++                    target = try await openIPad(savedPeer, at: endpoints, record: savedRecord)
++                } catch {
++                    lastTunnelError = error
++                }
++            }
++        }
++        try Task.checkCancellation()
++        guard let (device, endpoint) = target else {
++            if foundSavedIPad, let failure = lastTunnelError as? DeviceConnection.TunnelError,
++               failure.kind == TunnelFailurePairVerify {
++                throw EngineError.message("The iPad rejected its saved pairing. Unlock it and retry. If it still rejects the pairing, use Forget iPad and pair again.")
++            }
++            throw EngineError.message("Couldn’t reach your iPad. Unlock it, check Developer Mode and make sure both devices are on the same Wi-Fi. Then retry. Your pairing is saved.")
++        }
++        if endpoint.address != savedPeer.address || endpoint.port != savedPeer.port ||
++            (device.name ?? savedPeer.name) != savedPeer.name {
++            do {
++                rememberedIPad = try RememberedIPad.save(record: savedRecord, udid: savedPeer.udid,
++                                                         name: device.name ?? savedPeer.name,
++                                                         address: endpoint.address, port: endpoint.port)
++            } catch {
++                engine.log("Could not update the remembered iPad’s address: \(short(error))")
++            }
++        }
++        pairRecordPath = savedRecord.path
++        remotePairingPort = endpoint.port
++        targetSummary = device.summary
++        targetOSVersion = device.osVersion
++        targetUDID = savedPeer.udid
++        targetName = device.name ?? savedPeer.name
++        setStep(.connect, .done)
++        return endpoint.address
++    }
++
++    /// Only returns after the trusted tunnel identifies the expected iPad.
++    private func openIPad(_ peer: RememberedIPad, at endpoints: [IPadEndpoint],
++                          record: URL) async throws -> (ConnectedTarget, IPadEndpoint) {
++        try await onDeviceQueue {
++            var lastError: Error = EngineError.message("The saved iPad is unavailable.")
++            for endpoint in endpoints {
++                do {
++                    try self.connection.connect(deviceIP: endpoint.address, pairingFilePath: record.path,
++                                                allowLockdownMinting: false, remotePairingPort: endpoint.port)
++                    let device = try self.describeTarget(ip: endpoint.address)
++                    guard device.udid?.caseInsensitiveCompare(peer.udid) == .orderedSame else {
++                        throw EngineError.message("The connected device did not match your saved iPad.")
++                    }
++                    return (device, endpoint)
++                } catch {
++                    self.connection.disconnect()
++                    lastError = error
++                }
++            }
++            throw lastError
++        }
++    }
++
+     /// Opens the link to their iPhone, and returns the address it's reached at:
+     /// the one typed in, or the one it paired from.
+     @MainActor
+@@ -1413,7 +1627,7 @@ final class SideBySideManager: ObservableObject {
+     // MARK: - Step 4: sign for their device
+ 
+     @MainActor
+-    private func signApp(_ app: SideBySideApp) async throws {
++    private func signApp(_ app: SideBySideApp, increasedMemory: Bool) async throws {
+         try Task.checkCancellation()
+         guard let session = signSession else { throw EngineError.message(L("Not signed in.")) }
+         guard let ipa = downloadedIPA else {
+@@ -1430,7 +1644,8 @@ final class SideBySideManager: ObservableObject {
+         }
+         setStep(.sign, .active)
+         let path = try await onSignQueue {
+-            try self.performSign(session: session, ipa: ipa.path, udid: udid, deviceName: name)
++            try self.performSign(session: session, ipa: ipa.path, udid: udid, deviceName: name,
++                                 increasedMemory: increasedMemory)
+         }
+         signedAppPath = path
+         let info = Self.bundleInfo(at: path)
+@@ -1440,16 +1655,15 @@ final class SideBySideManager: ObservableObject {
+     }
+ 
+     private func performSign(session: OpaquePointer, ipa: String,
+-                             udid: String, deviceName: String) throws -> String {
++                             udid: String, deviceName: String, increasedMemory: Bool) throws -> String {
+         engine.log("Signing \(ipa) for \(udid.isEmpty ? "their iPhone" : udid) …")
+         var signed: UnsafeMutablePointer<CChar>?
+         var error: UnsafeMutablePointer<CChar>?
+         // No bundled pairing file: only AltStore 2.3 read one, and from 2.3.1
+-        // on it takes the file `setUp` writes into its Documents. No Increased
+-        // Memory Limit: SideInstaller has no use for it, and the SideStore
+-        // builds and AltStore re-register their App IDs without it. Every app
+-        // gets its app group, as on the Install tab.
+-        let rc = si_sign_ipa(session, ipa, udid, deviceName, nil, 0, 1, &signed, &error)
++        // on it takes the file `setUp` writes into its Documents. Every app
++        // gets its app group, as on the Install tab. Mode 1 requires Apple
++        // to enable Increased Memory Limit when the user opts in.
++        let rc = si_sign_ipa(session, ipa, udid, deviceName, nil, increasedMemory ? 1 : 0, 1, &signed, &error)
+         if rc == 0 {
+             let path = signed.map { String(cString: $0) } ?? ""
+             signed.map { si_string_free($0) }
+@@ -1470,6 +1684,9 @@ final class SideBySideManager: ObservableObject {
+             if Engine.isDeviceRegistrationError(message) {
+                 throw EngineError.message(L("Apple wouldn't register their iPhone with this Apple ID's developer team, so it won't issue a provisioning profile. %@", message))
+             }
++            if increasedMemory, message.localizedCaseInsensitiveContains("increased memory entitlement") {
++                throw EngineError.message("Apple couldn’t enable Increased Memory Limit for this app. \(message)")
++            }
+             throw EngineError.message(L("Signing failed: %@", message))
+         }
+     }
+@@ -1493,13 +1710,64 @@ final class SideBySideManager: ObservableObject {
+ 
+     // MARK: - Step 5: install over AFC + installation_proxy
+ 
++    private func signedIPadProfile() -> ProvisioningProfile? {
++        guard let path = signedAppPath, let bundleID = signedBundleID,
++              let data = try? Data(contentsOf: URL(fileURLWithPath: path).appendingPathComponent("embedded.mobileprovision")),
++              let profile = ProvisioningProfile(data: data), profile.bundleIdentifier == bundleID else {
++            return nil
++        }
++        return profile
++    }
++
++    @MainActor
++    private func recordIPadInstall(custom: CustomIPA, profile: ProvisioningProfile,
++                                   appleID: String, refreshing saved: IPadRefreshApp?) async {
++        guard let deviceID = targetUDID, let bundleID = signedBundleID else { return }
++        let entry = IPadRefreshApp(archiveID: saved?.archiveID ?? UUID(), deviceID: deviceID,
++                                   applicationID: profile.applicationIdentifier, bundleID: bundleID,
++                                   appleID: appleID, name: installedAppName ?? custom.name,
++                                   version: custom.version,
++                                   increasedMemory: profile.entitlements[IPadRefreshStore.memoryEntitlement] as? Bool == true,
++                                   expirationDate: profile.expirationDate)
++        let store = refreshStore
++        let source = saved == nil ? custom.file : nil
++        let result: Result<[IPadRefreshApp], Error> = await withCheckedContinuation { continuation in
++            DispatchQueue.global(qos: .utility).async {
++                continuation.resume(returning: Result { try store.save(entry, originalIPA: source) })
++            }
++        }
++        do {
++            refreshApps = try result.get()
++        } catch {
++            refreshNotice = saved == nil
++                ? "The app installed, but its refresh copy couldn’t be saved. \(short(error))"
++                : "The app refreshed, but its saved expiry couldn’t be updated. \(short(error))"
++        }
++    }
++
++    @MainActor
++    func removeIPadRefreshCopy(_ app: IPadRefreshApp) {
++        guard personalIPadMode, !isRunning, appsForRememberedIPad.contains(app) else { return }
++        do {
++            refreshApps = try refreshStore.remove(app)
++            refreshNotice = nil
++        } catch {
++            refreshNotice = "Couldn’t remove the saved refresh copy. \(short(error))"
++        }
++    }
++
+     @MainActor
+-    private func install(ip: String) async throws {
++    private func install(ip: String, refreshingBundleID: String?) async throws {
+         try Task.checkCancellation()
+         guard let bundle = signedAppPath else { throw EngineError.message(L("No signed bundle to install.")) }
+         guard let record = pairRecordPath else { throw EngineError.message(L("No pair record for their iPhone.")) }
+         setStep(.install, .active)
+         engine.installProgress = 0
++        let port = remotePairingPort
++        let expectedUDID = personalIPadMode ? targetUDID : nil
++        if personalIPadMode, expectedUDID == nil {
++            throw EngineError.message("The iPad did not return a device identifier.")
++        }
+         do {
+             try await onDeviceQueue {
+                 // iOS drops the idle tunnel during sign-in and signing, and
+@@ -1507,13 +1775,26 @@ final class SideBySideManager: ObservableObject {
+                 self.engine.log("Refreshing the link to \(ip) before installing …")
+                 do {
+                     try self.connection.connect(deviceIP: ip, pairingFilePath: record,
+-                                                allowLockdownMinting: false)
++                                                allowLockdownMinting: false, remotePairingPort: port)
+                 } catch let error as DeviceConnection.TunnelError {
++                    if expectedUDID != nil {
++                        throw EngineError.message("The connection to your iPad dropped. Keep it unlocked and retry. Your pairing is saved.")
++                    }
+                     throw EngineError.message(Self.tunnelAdvice(error, ip: ip))
+                 }
+                 guard self.connection.isConnected else {
+                     throw EngineError.message(L("The link to their iPhone dropped. Start again."))
+                 }
++                if let expectedUDID {
++                    let device = try self.describeTarget(ip: ip)
++                    guard device.udid?.caseInsensitiveCompare(expectedUDID) == .orderedSame else {
++                        self.connection.disconnect()
++                        throw EngineError.message("The connected device did not match your saved iPad.")
++                    }
++                }
++                if let refreshingBundleID, try !self.connection.isInstalled(bundleID: refreshingBundleID) {
++                    throw EngineError.message("That app is no longer installed on your iPad. Choose its IPA to install it again.")
++                }
+                 self.engine.log("Installing the signed bundle via AFC + installation_proxy …")
+                 try self.connection.installSignedApp(bundlePath: bundle)
+                 self.engine.log("Install request completed.")
+@@ -1670,7 +1951,8 @@ final class SideBySideManager: ObservableObject {
+     /// `deviceQueue`.
+     private func reconnectIfNeeded(ip: String, record: String) throws {
+         guard !connection.isConnected else { return }
+-        try connection.connect(deviceIP: ip, pairingFilePath: record, allowLockdownMinting: false)
++        try connection.connect(deviceIP: ip, pairingFilePath: record, allowLockdownMinting: false,
++                               remotePairingPort: remotePairingPort)
+     }
+ 
+     /// The pair record as the app on their iPhone reads it: an XML plist, since
+diff --git a/ios-app/SideInstallerApp.swift b/ios-app/SideInstallerApp.swift
+index b068ea2..ffa8449 100644
+--- a/ios-app/SideInstallerApp.swift
++++ b/ios-app/SideInstallerApp.swift
+@@ -30,6 +30,13 @@ struct SideInstallerApp: App {
+ 
+     var body: some Scene {
+         WindowGroup {
++            #if PERSONAL_IPAD_INSTALLER
++            PersonalIPadView()
++                .environment(engine)
++                .environmentObject(localizer)
++                .environmentObject(accounts)
++                .preferredColorScheme(.dark)
++            #else
+             ZStack {
+                 if hasAcceptedTOS && hasCompletedAccountSetup {
+                     RootView()
+@@ -72,6 +79,7 @@ struct SideInstallerApp: App {
+                     Task { await engine.importCustomIPA(from: url) }
+                 }
+             }
++            #endif
+         }
+     }
+ }
+diff --git a/ios-app/SideStoreDownloader.swift b/ios-app/SideStoreDownloader.swift
+index 1b0894f..143a1c4 100644
+--- a/ios-app/SideStoreDownloader.swift
++++ b/ios-app/SideStoreDownloader.swift
+@@ -2374,6 +2374,14 @@ extension IPALibrary {
+ /// The folder is excluded from backups (`keptOutOfBackups`).
+ enum PrivateStore {
+ 
++    static var rememberedIPadPairing: URL {
++        directory.appendingPathComponent("remembered-ipad.plist")
++    }
++
++    static var iPadRefreshDirectory: URL {
++        directory.appendingPathComponent("ipad-refresh", isDirectory: true)
++    }
++
+     /// The device pairing file (from the RPPairing host, or imported).
+     static var pairingFile: URL {
+         resolve(private: directory.appendingPathComponent("rp_pairing_file.plist"),
+diff --git a/ios-tests/IPadRefreshStoreTests.swift b/ios-tests/IPadRefreshStoreTests.swift
+new file mode 100644
+index 0000000..a76ee4f
+--- /dev/null
++++ b/ios-tests/IPadRefreshStoreTests.swift
+@@ -0,0 +1,42 @@
++import Foundation
++import Testing
++@testable import SideInstaller
++
++struct IPadRefreshStoreTests {
++    @Test func refreshKeepsOriginalIPAAndUpdatesProfile() throws {
++        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        defer { try? FileManager.default.removeItem(at: folder) }
++        let store = IPadRefreshStore(directory: folder.appendingPathComponent("refresh"))
++        let original = folder.appendingPathComponent("original.ipa")
++        let payload = Data("test IPA".utf8)
++        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
++        try payload.write(to: original)
++        #expect(try store.load().isEmpty)
++
++        let id = UUID()
++        let initial = entry(id: id, memory: false, expiry: 100)
++        _ = try store.save(initial, originalIPA: original)
++        try FileManager.default.removeItem(at: original)
++
++        let renewed = entry(id: id, memory: true, expiry: 200)
++        _ = try store.save(renewed, originalIPA: nil)
++        #expect(try store.load() == [renewed])
++        #expect(try Data(contentsOf: store.archive(for: renewed)) == payload)
++
++        let missing = folder.appendingPathComponent("missing.ipa")
++        #expect(throws: (any Error).self) { try store.save(entry(id: UUID(), memory: false, expiry: 300), originalIPA: missing) }
++        #expect(try store.load() == [renewed])
++        #expect(FileManager.default.fileExists(atPath: store.archive(for: renewed).path))
++
++        let remaining = try store.remove(renewed)
++        #expect(remaining.isEmpty)
++        #expect(!FileManager.default.fileExists(atPath: store.archive(for: renewed).path))
++    }
++
++    private func entry(id: UUID, memory: Bool, expiry: TimeInterval) -> IPadRefreshApp {
++        IPadRefreshApp(archiveID: id, deviceID: "iPad", applicationID: "TEAM.com.example.app.TEAM",
++                       bundleID: "com.example.app.TEAM", appleID: "test@example.com", name: "Example",
++                       version: "1.0", increasedMemory: memory,
++                       expirationDate: Date(timeIntervalSince1970: expiry))
++    }
++}
+diff --git a/ios-tests/RememberedIPadTests.swift b/ios-tests/RememberedIPadTests.swift
+new file mode 100644
+index 0000000..a3a7a19
+--- /dev/null
++++ b/ios-tests/RememberedIPadTests.swift
+@@ -0,0 +1,37 @@
++import Foundation
++import Testing
++@testable import SideInstaller
++
++struct RememberedIPadTests {
++    @Test func recordSurvivesReloadAndAddressChange() throws {
++        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
++        defer { try? FileManager.default.removeItem(at: folder) }
++        let source = folder.appendingPathComponent("pair.plist")
++        let saved = folder.appendingPathComponent("ipad.plist")
++        let key = try #require(Data(base64Encoded: "Mgp6ZGPzXM2ku9br46vsiw=="))
++        let raw: [String: Any] = [
++            "private_key": Data(repeating: 1, count: 32),
++            "public_key": Data(repeating: 2, count: 32),
++            "identifier": "test-host",
++            "alt_irk": key,
++        ]
++        try PropertyListSerialization.data(fromPropertyList: raw, format: .xml, options: 0).write(to: source)
++        _ = try RememberedIPad.save(record: source, to: saved, udid: "test-udid",
++                                    name: "Test iPad", address: "192.168.1.10")
++        try FileManager.default.removeItem(at: source)
++        let first = try RememberedIPad.read(from: saved)
++        #expect(first.address == "192.168.1.10")
++        #expect(first.udid == "test-udid")
++        #expect(first.matches(identifier: "2BE6E510-0325-4365-923E-B14C6F57DB3A", tag: "kXjlTr2l"))
++        #expect(!first.matches(identifier: "2BE6E510-0325-4365-923E-B14C6F57DB3A", tag: "kXjlTr2m"))
++        _ = try RememberedIPad.save(record: saved, to: saved, udid: first.udid,
++                                    name: first.name, address: "192.168.1.20", port: 49153)
++        let moved = try RememberedIPad.read(from: saved)
++        #expect(moved.address == "192.168.1.20")
++        #expect(moved.port == 49153)
++        #expect(moved.udid == first.udid)
++        #expect(moved.discoveryKey == key)
++        #expect(PairingFileKind.of(path: saved.path).hasRemotePairing)
++    }
++}
+diff --git a/rust-core/include/sideinstaller.h b/rust-core/include/sideinstaller.h
+index 076d330..dffdd1a 100644
+--- a/rust-core/include/sideinstaller.h
++++ b/rust-core/include/sideinstaller.h
+@@ -7,6 +7,7 @@
+ #define SIDEINSTALLER_H
+ 
+ #include <stddef.h>
++#include <stdbool.h>
+ #include <stdint.h>
+ 
+ #ifdef __cplusplus
+@@ -38,6 +39,9 @@ char *si_ping(void);
+ // Free any char* returned by this library.
+ void si_string_free(char *p);
+ 
++// Remote Pairing Bonjour advertisement. `key` is the saved 16-byte peer altIRK.
++bool si_pairing_matches_advert(const uint8_t *key, const char *identifier, const char *auth_tag);
++
+ // ---------------------------------------------------------------------------
+ // Pairing — RPPairing host (STEP 2)
+ // ---------------------------------------------------------------------------
+diff --git a/rust-core/src/lib.rs b/rust-core/src/lib.rs
+index 99315b2..af2a573 100644
+--- a/rust-core/src/lib.rs
++++ b/rust-core/src/lib.rs
+@@ -70,6 +70,32 @@ pub unsafe extern "C" fn si_string_free(p: *mut c_char) {
+     ffi_util::string_free(p);
+ }
+ 
++/// Match a Remote Pairing Bonjour advertisement against the paired device's key.
++///
++/// # Safety
++/// `key` must point to 16 readable bytes. The other pointers must be valid
++/// NUL-terminated C strings, or null.
++#[no_mangle]
++pub unsafe extern "C" fn si_pairing_matches_advert(
++    key: *const u8,
++    identifier: *const c_char,
++    auth_tag: *const c_char,
++) -> bool {
++    if key.is_null() {
++        return false;
++    }
++    let (Some(identifier), Some(auth_tag)) =
++        (ffi_util::req_str(identifier), ffi_util::req_str(auth_tag))
++    else {
++        return false;
++    };
++    idevice::remote_pairing::PeerDevice::validate_auth_tag(
++        std::slice::from_raw_parts(key, 16),
++        &identifier,
++        &auth_tag,
++    )
++}
++
+ // ---------------------------------------------------------------------------
+ // Pairing — the RPPairing host
+ // ---------------------------------------------------------------------------
+diff --git a/scripts/build-ipa.sh b/scripts/build-ipa.sh
+index 559e3e3..0421bdb 100755
+--- a/scripts/build-ipa.sh
++++ b/scripts/build-ipa.sh
+@@ -6,7 +6,7 @@
+ #
+ #   scripts/build-ipa.sh
+ #
+-# Needs Xcode with the iOS 27.1 SDK or later, Rust with the aarch64-apple-ios
++# Needs Xcode with the iOS 27.1 SDK or later (27.2 for the dedicated installer), Rust with the aarch64-apple-ios
+ # target (added here when rustup is around) and xcodegen.
+ #
+ # For a clean clone, like the one CI checks out. The Xcode project is generated
+@@ -24,8 +24,8 @@
+ #   DERIVED_DATA   Xcode build folder (default: build/DerivedData)
+ #   REBUILD_RUST   1 = rebuild SideInstallerFFI.xcframework even when one is
+ #                  there (default: build it only when it's missing)
+-#   MIN_IOS_SDK    oldest iOS SDK to build with (default: 27.1, the first the
+-#                  iPhone Duo shows full screen)
++#   PERSONAL_IPAD_INSTALLER  1 = build the dedicated iPhone-to-iPad installer
++#   MIN_IOS_SDK    oldest iOS SDK for a standard build (default: 27.1)
+ set -euo pipefail
+ # Say where it stopped: a failing command under set -e, or an unset variable
+ # under set -u, otherwise ends the script without a word.
+@@ -76,12 +76,18 @@ fi
+ command -v xcodegen >/dev/null || die "xcodegen isn't installed (brew install xcodegen)"
+ command -v cargo >/dev/null || die "Rust isn't installed (https://rustup.rs)"
+ echo "==> $(xcodebuild -version | tr '\n' ' ')"
++if [ "${PERSONAL_IPAD_INSTALLER:-0}" = 1 ]; then
++  MIN_IOS_SDK=27.2
++  xcode_version="$(xcodebuild -version | awk '/^Xcode / { print $2 }')"
++  [ "$(printf '%s\n' '27.2' "$xcode_version" | sort -V | head -1)" = 27.2 ] ||
++    die "Install on iPad needs Xcode 27.2 or newer (selected: ${xcode_version:-unknown})"
++fi
+ # The iPhone Duo runs an app built with an older iOS SDK in a window beside its
+ # status bar instead of across the whole screen, so an older Xcode is refused.
+ sdk="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || true)"
+ [ -n "$sdk" ] || die "this Xcode has no iOS SDK"
+ [ "$(printf '%s\n' "$MIN_IOS_SDK" "$sdk" | sort -V | head -1)" = "$MIN_IOS_SDK" ] ||
+-  die "this Xcode has the iOS $sdk SDK; SideInstaller needs the iOS $MIN_IOS_SDK SDK or later (Xcode $MIN_IOS_SDK+), or the iPhone Duo shows it in a window instead of full screen"
++  die "the selected Xcode has iOS SDK $sdk; this build requires iOS SDK $MIN_IOS_SDK or newer"
+ 
+ # --- Rust library -------------------------------------------------------------
+ if [ "$REBUILD_RUST" = 1 ] || [ ! -d SideInstallerFFI.xcframework ]; then
+@@ -111,6 +117,9 @@ sed -i '' -E "s/(PRODUCT_BUNDLE_IDENTIFIER = \"?)$(printf '%s' "$app_id" | sed '
+ overrides=()
+ [ -n "$VERSION" ] && overrides+=("MARKETING_VERSION=$VERSION")
+ [ -n "$BUILD_NUMBER" ] && overrides+=("CURRENT_PROJECT_VERSION=$BUILD_NUMBER")
++if [ "${PERSONAL_IPAD_INSTALLER:-0}" = 1 ]; then
++  overrides+=("SWIFT_ACTIVE_COMPILATION_CONDITIONS=PERSONAL_IPAD_INSTALLER")
++fi
+ echo "==> Building SideInstaller (Release, unsigned)"
+ # A precompiled module of an older Rust header fails the build.
+ find "$DERIVED_DATA" -name 'SideInstallerFFI-*.pcm' -delete 2>/dev/null || true
+@@ -144,6 +153,19 @@ stage="$(mktemp -d)"
+ trap 'rm -rf "$stage"' EXIT
+ mkdir -p "$stage/Payload" "$(dirname "$OUTPUT")"
+ ditto "$app" "$stage/Payload/SideInstaller.app"
++if [ "${PERSONAL_IPAD_INSTALLER:-0}" = 1 ]; then
++  /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Install on iPad' \
++    "$stage/Payload/SideInstaller.app/Info.plist"
++  /usr/libexec/PlistBuddy -c 'Set :NSLocalNetworkUsageDescription Install on iPad finds and connects to your paired iPad on your Wi-Fi network.' \
++    "$stage/Payload/SideInstaller.app/Info.plist"
++  /usr/libexec/PlistBuddy -c 'Delete :CFBundleURLTypes' "$stage/Payload/SideInstaller.app/Info.plist"
++  /usr/libexec/PlistBuddy -c 'Delete :CFBundleDocumentTypes:1' "$stage/Payload/SideInstaller.app/Info.plist"
++  # The dedicated screen shows the peer PIN itself. A single bundle keeps
++  # the upload compatible with signing profiles that can't sign extensions.
++  if [ -d "$stage/Payload/SideInstaller.app/PlugIns/SideInstallerLiveActivity.appex" ]; then
++    rm -rf "$stage/Payload/SideInstaller.app/PlugIns/SideInstallerLiveActivity.appex"
++  fi
++fi
+ find "$stage" -name .DS_Store -delete
+ rm -f "$OUTPUT" # zip would add to an existing archive instead of replacing it
+ (cd "$stage" && zip -qryX "$OUTPUT" Payload)

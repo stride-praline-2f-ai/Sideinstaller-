@@ -1,0 +1,91 @@
+name: Build Install on iPad
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build-personal-ipad.yml
+      - install-on-ipad.patch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-on-ipad-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in /Applications/Xcode_27.2.app /Applications/Xcode*.app; do
+            developer_dir="$app/Contents/Developer"
+            [ -x "$developer_dir/usr/bin/xcodebuild" ] || continue
+            version="$(DEVELOPER_DIR="$developer_dir" xcodebuild -version)" || continue
+            sdk="$(DEVELOPER_DIR="$developer_dir" xcrun --sdk iphoneos --show-sdk-version)" || continue
+            xcode="$(awk '/^Xcode / { print $2 }' <<< "$version")"
+            if awk -v xcode="$xcode" -v sdk="$sdk" 'BEGIN {
+              split(xcode, x, "."); split(sdk, s, ".")
+              exit !((x[1] > 27 || (x[1] == 27 && x[2] >= 2)) &&
+                     (s[1] > 27 || (s[1] == 27 && s[2] >= 2)))
+            }'; then
+              printf 'DEVELOPER_DIR=%s\n' "$developer_dir" >> "$GITHUB_ENV"
+              printf '%s\niOS SDK %s\n' "$version" "$sdk"
+              exit 0
+            fi
+          done
+          echo '::error::The runner needs Xcode 27.2 or newer with an iOS 27.2 or newer device SDK.'
+          exit 1
+
+      - name: Prepare app source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/sideinstaller"
+          git -C "$RUNNER_TEMP/sideinstaller" fetch --depth=1 https://github.com/FrizzleM/SideInstaller.git 50b2a0dea22d43659e2630e01daa9097145874cb
+          git -C "$RUNNER_TEMP/sideinstaller" checkout --detach FETCH_HEAD
+          git -C "$RUNNER_TEMP/sideinstaller" apply --check "$GITHUB_WORKSPACE/install-on-ipad.patch"
+          git -C "$RUNNER_TEMP/sideinstaller" apply "$GITHUB_WORKSPACE/install-on-ipad.patch"
+          rm -rf "$RUNNER_TEMP/sideinstaller/.github/workflows"
+          git -C "$RUNNER_TEMP/sideinstaller" add -A
+          git -C "$RUNNER_TEMP/sideinstaller" -c user.name='Actions' -c user.email='actions@users.noreply.github.com' commit -m 'Apply Install on iPad source changes'
+
+      - name: Install build dependencies
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          rustup target add aarch64-apple-ios
+
+      - name: Build unsigned IPA
+        env:
+          PERSONAL_IPAD_INSTALLER: "1"
+          BUNDLE_ID: com.personaltools.installonipad
+          VERSION: "1.1.0"
+          BUILD_NUMBER: ${{ github.run_number }}
+          OUTPUT: ${{ runner.temp }}/Install-on-iPad.ipa
+        working-directory: ${{ runner.temp }}/sideinstaller
+        run: bash scripts/build-ipa.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Install-on-iPad
+          path: ${{ runner.temp }}/Install-on-iPad.ipa
+          if-no-files-found: error
+
+      - name: Test pairing and refresh storage
+        working-directory: ${{ runner.temp }}/sideinstaller
+        run: |
+          rustup target add aarch64-apple-ios-sim
+          git worktree add --detach "$RUNNER_TEMP/ipad-test" HEAD
+          cd "$RUNNER_TEMP/ipad-test"
+          bash scripts/check-ios.sh
