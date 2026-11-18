@@ -185,3 +185,11 @@ On the prior measured screen, the intended target predicate matches **x=646.7, y
 GitHub macOS Intel compile passed: [run #44417162417](https://github.com/stride-praline-2f-ai/Sideinstaller-/actions/runs/44417162417).
 
 The resulting **unsigned v11 test IPA** was packaged locally from the known-working original 1.2.13 build 40 (no v9/v10 nesting) with the status-bar-hidden plist setting. Its SHA-256 is `13d1bbf188d519e7308326aa0300a9138daa4b0cce8fc27e3207956d0e843687`. Package CRC and file-difference checks passed; 86 nested signatures remain intact. This does not establish the behaviour on the phone, the desired iPad mini layout, or a signed build. The user must sign and test it on-device; revert to the original if anything fails.
+
+## Native iPad mini style requested: exact Duo geometry policy (18 Nov 2026)
+
+Goal: retain Plumi's iPad-style navigation and **two-column** Chemistry dashboard on the unfolded 951×669-point Duo, avoid original 71.7-point right-pane internal overflow, and retain a single-pane view on narrower folded/portrait sizes.
+
+The updated source-only `PlumiPanePolicy.swift` now uses **376-point sidebar**, **480-point minimum main pane** and **16-point gap**, subtracting **16-point outer margins** each side. At the measured 951-point Duo width, this yields **527-point main pane + 376-point sidebar + 16 gap + 32 margins**. At 744-point iPad mini portrait, it becomes stacked. On 1133-point landscape it is two-column.
+
+This is a precise **source-level** responsive-layout design, not a compiled-Plumi binary patch. The received IPA contains no editable Plumi dashboard source. Do **not** claim it is installed or working on the Duo. Using a global iPad idiom or width-class override was already tested and worsened Plumi; those approaches remain excluded. The original app is intentionally untouched.
