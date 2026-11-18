@@ -46,3 +46,15 @@ Fixes implemented in `PlumiDuoLayout.m`:
 The macOS Intel build passed and compiled an arm64 dylib. A locally built unsigned IPA using the user's original Plumi 1.2.13 retains all 86 nested signing entries, omits only two obsolete main-app signing entries, modifies only the executable and adds one dylib. Archive CRC validation succeeded. The user's IPA is **not** committed to GitHub.
 
 **Important:** The fix is not proven on-device. A successfully compiled dylib and structurally valid IPA do not establish that the SwiftUI overlap has been fixed or that every runtime path is crash-free. A new signed-on-device test is still required.
+
+## 18 Nov 2026: v4 device test FAILED: do not distribute as fix
+
+The user tested v4 on iPhone Duo and shared two screenshots: the new build's subject-onboarding screen and the original version's Chemistry dashboard. Because these are **different screens**, the screenshots cannot establish a strict within-screen comparison. The new onboarding screen appears awkwardly laid out and clipped at the bottom, and the user reports it is worse overall. This is sufficient reason to discontinue the global compact horizontal-size-class experiment.
+
+**Root design problem:** UIWindowScene trait overrides propagate through every descendant in that scene. Forcing compact width globally in landscape is a blunt change; it does not solve per-view width, safe-area and clipping bugs reliably, and can cause unexpected SwiftUI reflows.
+
+- v4 is a **failed experiment**, not a supported compatibility patch.
+- Prefer uninstalling/replacing it with the known-working original Plumi IPA.
+- On this research branch, the shim now defaults to **no changes**; opting into the old global experiment requires `PlumiDuoLayoutExperimentalOptIn = YES` in app preferences. This opt-in is for controlled development only, not users.
+- Do not publish further layout IPAs without same-screen comparison and a narrower patch backed by actual observations.
+- Further work should target Plumi's app-defined pane widths or safe-area/insets at the affected screen, ideally with app source or an isolated view implementation. A generic iPad identity or size-class spoof is not a confirmed solution.
