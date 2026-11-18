@@ -11,6 +11,11 @@
 @property(nonatomic,strong) NSHashTable<UIWindow *> *observedWindows;
 @property(nonatomic,weak) UIView *scaledView;
 @property(nonatomic,weak) UIScrollView *selectedScroll;
+// Capture the matching scroll view while Plumi is unobstructed.
+// Its content geometry may change as UIKit presents an action sheet.
+@property(nonatomic,weak) UIScrollView *menuTarget;
+@property(nonatomic,assign) CGFloat menuContentWidth;
+@property(nonatomic,assign) CGFloat menuViewportWidth;
 @property(nonatomic,assign) CGAffineTransform originalTransform;
 @property(nonatomic,assign) CGPoint originalCenter;
 @property(nonatomic,assign) BOOL isFitted;
@@ -104,11 +109,19 @@
     }
 }
 - (UIScrollView *)target:(UIWindow *)window {
-    if (!window.windowScene || !UIInterfaceOrientationIsLandscape(window.windowScene.interfaceOrientation))
-        return nil;
+    if (!window.windowScene ||
+        !UIInterfaceOrientationIsLandscape(window.windowScene.interfaceOrientation)) return nil;
+    // Prefer the valid scroll view captured BEFORE opening a pop-up.
+    // Without this, modal presentation can temporarily alter SwiftUI contentSize.
+    UIScrollView *cached=self.menuTarget;
+    if (cached && cached.window && cached.window.windowScene==window.windowScene)
+        return cached;
     UIScrollView *best=nil;
     CGFloat bestDelta=0;
-    [self scan:window window:window depth:0 best:&best bestDelta:&bestDelta];
+    for (UIWindow *candidate in window.windowScene.windows) {
+        if (!candidate || candidate.hidden) continue;
+        [self scan:candidate window:candidate depth:0 best:&best bestDelta:&bestDelta];
+    }
     return best;
 }
 - (UIView *)visualContent:(UIScrollView *)scroll {
@@ -151,8 +164,10 @@
     if (!scroll) return @"No overflowing right-hand scroll content found on this screen.";
     UIView *content=[self visualContent:scroll];
     if (!content) return @"The right-hand scroll content is not accessible as a separate UIKit view.";
-    CGFloat contentWidth=scroll.contentSize.width;
-    CGFloat viewport=scroll.bounds.size.width;
+    CGFloat contentWidth=(scroll==self.menuTarget && self.menuContentWidth>0)
+        ? self.menuContentWidth : scroll.contentSize.width;
+    CGFloat viewport=(scroll==self.menuTarget && self.menuViewportWidth>0)
+        ? self.menuViewportWidth : scroll.bounds.size.width;
     CGFloat scale=viewport/MAX(contentWidth,1);
     if (!isfinite(scale) || scale<=0.60 || scale>=0.99)
         return @"The right-hand pane does not need a supported visual scale.";
@@ -201,23 +216,57 @@
     while (p.presentedViewController) p=p.presentedViewController;
     return p;
 }
-- (void)message:(NSString *)text window:(UIWindow *)window {
-    UIViewController *p=[self presenter:window];
-    if (!p) return;
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Plumi Duo"
-       message:text preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-    [p presentViewController:alert animated:YES completion:nil];
+- (void)feedback:(NSString *)text window:(UIWindow *)window {
+    // Non-modal feedback: never present a second UIAlertController over the
+    // still-dismissing action sheet. v9 accidentally did precisely that.
+    if (!window || !text.length) return;
+    @try {
+        for (UIView *v in window.subviews)
+            if (v.tag==0x504c55) [v removeFromSuperview];
+        CGFloat width=MIN(window.bounds.size.width-48,610.0);
+        UILabel *label=[[UILabel alloc] initWithFrame:CGRectMake(
+            (window.bounds.size.width-width)/2.0, 105, width, 72)];
+        label.tag=0x504c55;
+        label.backgroundColor=[[UIColor blackColor] colorWithAlphaComponent:0.87];
+        label.textColor=UIColor.whiteColor;
+        label.font=[UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
+        label.textAlignment=NSTextAlignmentCenter;
+        label.numberOfLines=3;
+        label.layer.cornerRadius=15;
+        label.clipsToBounds=YES;
+        label.userInteractionEnabled=NO;
+        label.text=text;
+        [window addSubview:label];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(4*NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{[label removeFromSuperview];});
+    } @catch (NSException *e) {
+        NSLog(@"[PlumiDuoSidebarFit] feedback failed: %@",e.name);
+    }
 }
 - (void)showMenu:(UITapGestureRecognizer *)gesture {
     if (gesture.state!=UIGestureRecognizerStateRecognized) return;
     UIWindow *window=(UIWindow *)gesture.view;
     if (![window isKindOfClass:UIWindow.class]) return;
     @try {
+        // Capture the right-hand scroll view and its width BEFORE any modal.
+        self.menuTarget=nil;
+        self.menuContentWidth=0;
+        self.menuViewportWidth=0;
+        UIScrollView *captured=[self target:window];
+        self.menuTarget=captured;
+        if (captured) {
+            self.menuContentWidth=captured.contentSize.width;
+            self.menuViewportWidth=captured.bounds.size.width;
+        }
         UIViewController *p=[self presenter:window];
         if (!p) return;
+        NSString *summary=captured ?
+            [NSString stringWithFormat:@"Right panel detected before opening menu: %.1f pt content / %.1f pt viewport (%.1f pt overflow). No changes until you select an option.",
+                self.menuContentWidth,self.menuViewportWidth,
+                self.menuContentWidth-self.menuViewportWidth] :
+            @"No matching right-hand scroll view before opening the menu. No changes will be applied.";
         UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"Plumi Duo · Right Panel"
-            message:@"Only the Chemistry sidebar is changed, and only when you choose an option. No iPad identity or global size-class override."
+            message:summary
             preferredStyle:UIAlertControllerStyleActionSheet];
         __weak typeof(self) weakSelf=self;
         [menu addAction:[UIAlertAction actionWithTitle:@"Fit right panel content"
@@ -225,7 +274,7 @@
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.55*NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     NSString *result=[weakSelf fit:window];
-                    [weakSelf message:result window:window];
+                    [weakSelf feedback:result window:window];
                 });
             }]];
         [menu addAction:[UIAlertAction actionWithTitle:@"Allow right panel horizontal scrolling"
@@ -233,13 +282,13 @@
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.55*NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     NSString *result=[weakSelf enablePan:window];
-                    [weakSelf message:result window:window];
+                    [weakSelf feedback:result window:window];
                 });
             }]];
         [menu addAction:[UIAlertAction actionWithTitle:@"Restore original"
             style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
                 [weakSelf restore];
-                [weakSelf message:@"Original sidebar view restored." window:window];
+                [weakSelf feedback:@"Original sidebar view restored." window:window];
             }]];
         [menu addAction:[UIAlertAction actionWithTitle:@"Cancel"
             style:UIAlertActionStyleCancel handler:nil]];
