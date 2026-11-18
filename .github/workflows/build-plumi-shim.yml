@@ -1,0 +1,49 @@
+name: Build experimental Plumi Duo layout shim
+
+on:
+  push:
+    branches:
+      - research/plumi-duo-layout
+    paths:
+      - "experiments/plumi-duo/PlumiDuoLayout.m"
+      - ".github/workflows/build-plumi-shim.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Compile iOS arm64 dylib
+        shell: bash
+        run: |
+          set -euxo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          mkdir -p build
+          xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -miphoneos-version-min=17.0 \
+            -dynamiclib -fobjc-arc -fblocks \
+            -framework UIKit -framework Foundation \
+            -install_name "@executable_path/Frameworks/PlumiDuoLayout.dylib" \
+            -Wl,-dead_strip \
+            -o build/PlumiDuoLayout.dylib \
+            experiments/plumi-duo/PlumiDuoLayout.m
+          file build/PlumiDuoLayout.dylib
+          xcrun otool -L build/PlumiDuoLayout.dylib
+          shasum -a 256 build/PlumiDuoLayout.dylib > build/PlumiDuoLayout.dylib.sha256
+      - name: Upload experimental dylib only (no IPA)
+        uses: actions/upload-artifact@v4
+        with:
+          name: plumi-landscape-trait-shim
+          path: |
+            build/PlumiDuoLayout.dylib
+            build/PlumiDuoLayout.dylib.sha256
+          if-no-files-found: error
+          retention-days: 7
