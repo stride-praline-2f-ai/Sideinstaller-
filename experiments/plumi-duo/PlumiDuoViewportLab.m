@@ -112,7 +112,7 @@
     self.adjustedView=nil;
     self.hasAdjustment=NO;
 }
-- (NSString *)fitViewInWindow:(UIWindow *)window {
+- (NSString *)fitViewInWindow:(UIWindow *)window maximumScale:(CGFloat)maximumScale {
     [self restore];
     UIView *v=[self findDashboardView:window inWindow:window depth:0];
     if (!v) return @"No oversized dashboard container is visible. Navigate to Chemistry first.";
@@ -122,7 +122,7 @@
     @try {
         CGRect visible=[v convertRect:v.bounds toView:window];
         CGFloat usable=window.bounds.size.width-MAX(visible.origin.x,0);
-        CGFloat ratio=usable/MAX(visible.size.width,1);
+        CGFloat ratio=MIN(usable/MAX(visible.size.width,1), maximumScale);
         if (!isfinite(ratio) || ratio<=0.60 || ratio>=1)
             return @"The detected width doesn't require a supported fit adjustment.";
         self.adjustedView=v;
@@ -162,12 +162,17 @@
         UIViewController *p=[self presenter:window];
         if (!p) return;
         UIAlertController *a=[UIAlertController alertControllerWithTitle:@"Plumi Duo · Dashboard Fit"
-            message:@"Experimental, reversible visual fit for the oversized dashboard only. The original layout is unchanged until you choose Fit."
+            message:@"Original layout stays unchanged until you choose a fit option. Tighter fit may reveal more of the right-side dashboard, but also makes text smaller."
             preferredStyle:UIAlertControllerStyleActionSheet];
         __weak typeof(self) weakSelf=self;
-        [a addAction:[UIAlertAction actionWithTitle:@"Fit dashboard to window"
+        [a addAction:[UIAlertAction actionWithTitle:@"Fit container to screen"
             style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                NSString *result=[weakSelf fitViewInWindow:window];
+                NSString *result=[weakSelf fitViewInWindow:window maximumScale:1.0];
+                [weakSelf message:result onWindow:window];
+            }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Tighter fit (85%): show more of right panel"
+            style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                NSString *result=[weakSelf fitViewInWindow:window maximumScale:0.85];
                 [weakSelf message:result onWindow:window];
             }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Restore original layout"
