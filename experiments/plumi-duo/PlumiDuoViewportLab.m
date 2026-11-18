@@ -76,28 +76,87 @@
         NSLog(@"[PlumiViewportLab] registration exception: %@", e);
     }
 }
-- (UIView *)findDashboardView:(UIView *)view inWindow:(UIWindow *)window depth:(NSUInteger)depth {
-    if (!view || depth>15) return nil;
+// Identify a dashboard scroll *container* from its actual geometry, rather than
+// requiring one private class name and exact y/width thresholds. SwiftUI may use
+// slightly different wrapper classes between individual screens.
+- (UIView *)findDashboardView:(UIView *)root inWindow:(UIWindow *)window depth:(NSUInteger)depth {
+    if (!root || depth>30) return nil;
     @try {
-        NSString *name=NSStringFromClass(view.class);
-        CGRect rect=[view convertRect:view.bounds toView:window];
-        if ([name containsString:@"HostingScrollView"] &&
-            [name containsString:@"PlatformContainer"] &&
-            CGRectGetMinY(rect)>130 &&
-            rect.size.height>180 &&
-            rect.size.width>window.bounds.size.width+20 &&
-            rect.size.width<window.bounds.size.width*2.0) {
-            return view;
+        CGRect rect=[root convertRect:root.bounds toView:window];
+        NSString *className=NSStringFromClass(root.class);
+        BOOL isHostingScroll=([className containsString:@"HostingScrollView"] ||
+                              [className containsString:@"PlatformContainer"]);
+        CGFloat limit=window.bounds.size.width;
+        BOOL overflow=(CGRectGetMaxX(rect)>limit+12.0 || rect.size.width>limit+12.0);
+        BOOL mainPane=(CGRectGetMinY(rect)>95.0 && rect.size.height>135.0 &&
+                       rect.size.height<window.bounds.size.height*2.0);
+        if (isHostingScroll && mainPane && overflow &&
+            rect.size.width<limit*2.0) {
+            return root;
         }
-        for (UIView *child in view.subviews) {
-            UIView *found=[self findDashboardView:child inWindow:window depth:depth+1];
-            if (found) return found;
+        // Search wrappers below a normally-sized SwiftUI scroll view as well.
+        for (UIView *child in root.subviews) {
+            UIView *match=[self findDashboardView:child inWindow:window depth:depth+1];
+            if (match) return match;
         }
-    } @catch (NSException *e) {
-        NSLog(@"[PlumiViewportLab] searching view failed: %@",e);
+    } @catch (NSException *exception) {
+        NSLog(@"[PlumiViewportLab] view search exception: %@",exception);
     }
     return nil;
 }
+// The diagnostic report deliberately excludes all view text and user data.
+- (void)collectOverflows:(UIView *)view inWindow:(UIWindow *)window
+                  depth:(NSUInteger)depth remaining:(NSUInteger *)remaining
+                 output:(NSMutableString *)output {
+    if (!view || depth>30 || *remaining==0) return;
+    @try {
+        CGRect rect=[view convertRect:view.bounds toView:window];
+        NSString *name=NSStringFromClass(view.class);
+        BOOL interesting=([name containsString:@"HostingScrollView"] ||
+                          [name containsString:@"PlatformContainer"] ||
+                          [view isKindOfClass:UIScrollView.class]);
+        if (interesting && CGRectGetMinY(rect)>40) {
+            CGSize content=CGSizeZero;
+            if ([view isKindOfClass:UIScrollView.class])
+                content=((UIScrollView *)view).contentSize;
+            [output appendFormat:@"%lu %@ x=%.1f y=%.1f w=%.1f h=%.1f contentW=%.1f overflow=%.1f\n",
+                (unsigned long)depth,name,rect.origin.x,rect.origin.y,
+                rect.size.width,rect.size.height,content.width,
+                MAX(CGRectGetMaxX(rect)-window.bounds.size.width,0.0)];
+            --(*remaining);
+        }
+        for (UIView *child in view.subviews)
+            [self collectOverflows:child inWindow:window depth:depth+1 remaining:remaining output:output];
+    } @catch (NSException *e) {
+        [output appendFormat:@"Inspect exception %@\n",e.name];
+    }
+}
+- (void)exportGeometryInWindow:(UIWindow *)window {
+    NSMutableString *out=[NSMutableString stringWithFormat:
+        @"Plumi Duo v8 geometry only (no user text)\nWindow width %.1f height %.1f; safe area L %.1f R %.1f\n",
+        window.bounds.size.width,window.bounds.size.height,
+        window.safeAreaInsets.left,window.safeAreaInsets.right];
+    NSUInteger remaining=80;
+    [self collectOverflows:window inWindow:window depth:0 remaining:&remaining output:out];
+    NSURL *url=[NSURL fileURLWithPath:
+        [NSTemporaryDirectory() stringByAppendingPathComponent:@"PlumiDuo-v8-Geometry.txt"]];
+    NSError *error=nil;
+    if (![out writeToURL:url atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+        [self message:[NSString stringWithFormat:@"Report failed: %@",error.localizedDescription] onWindow:window];
+        return;
+    }
+    UIViewController *p=[self presenter:window];
+    if (!p) return;
+    UIActivityViewController *share=[[UIActivityViewController alloc]
+        initWithActivityItems:@[url] applicationActivities:nil];
+    UIPopoverPresentationController *popover=share.popoverPresentationController;
+    if (popover) {
+        popover.sourceView=window;
+        popover.sourceRect=CGRectMake(window.bounds.size.width/2,window.bounds.size.height/2,1,1);
+    }
+    [p presentViewController:share animated:YES completion:nil];
+}
+
 - (void)restore {
     if (!self.hasAdjustment) return;
     @try {
@@ -115,7 +174,7 @@
 - (NSString *)fitViewInWindow:(UIWindow *)window maximumScale:(CGFloat)maximumScale {
     [self restore];
     UIView *v=[self findDashboardView:window inWindow:window depth:0];
-    if (!v) return @"No oversized dashboard container is visible. Navigate to Chemistry first.";
+    if (!v) return @"No oversized hosting container matched. The window may clip an internal SwiftUI child instead. Use Export geometry report from the menu to measure this exact screen.";
     if (!window.windowScene ||
         !UIInterfaceOrientationIsLandscape(window.windowScene.interfaceOrientation))
         return @"The experiment is only available in landscape.";
@@ -167,13 +226,23 @@
         __weak typeof(self) weakSelf=self;
         [a addAction:[UIAlertAction actionWithTitle:@"Fit container to screen"
             style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                NSString *result=[weakSelf fitViewInWindow:window maximumScale:1.0];
-                [weakSelf message:result onWindow:window];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.55*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    NSString *result=[weakSelf fitViewInWindow:window maximumScale:1.0];
+                    [weakSelf message:result onWindow:window];
+                });
             }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Tighter fit (85%): show more of right panel"
             style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                NSString *result=[weakSelf fitViewInWindow:window maximumScale:0.85];
-                [weakSelf message:result onWindow:window];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.55*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    NSString *result=[weakSelf fitViewInWindow:window maximumScale:0.85];
+                    [weakSelf message:result onWindow:window];
+                });
+            }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Export screen geometry report"
+            style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [weakSelf exportGeometryInWindow:window];
+                });
             }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Restore original layout"
             style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
