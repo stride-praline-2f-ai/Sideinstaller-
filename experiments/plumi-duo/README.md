@@ -86,3 +86,13 @@ A *source-level* candidate is now included in `source-reference/`:
 - `.github/workflows/plumi-adaptive-columns.yml`: macOS Xcode iOS type-check and native policy tests; **passed in GitHub Actions run #44405578269**.
 
 The thresholds are **provisional** until the actual dashboard's SwiftUI content sizing is measured on device. No Plumi source code is accessible in the received compiled IPA, so **the reference view is not integrated into an installable Plumi IPA**. Do not distribute as a working fix or merge into the existing app. The last installable candidate remains v5 (status-bar-only); its on-device results are still unverified.
+
+## 18 November 2026: compiled binary forensics and safe geometry diagnostic
+
+Inspected the user's original Plumi 1.2.13 executable, not just its Info.plist. Swift nominal-type metadata confirms `PaneLayout`, `SubjectOverviewLayout`, `SubjectOverviewPage`, `SettingsLayout`, `AppShell` and `ShellChrome`. Embedded test names refer to iPad mini portrait, narrow iPad configurations, and preventing two-column overflow. These names do **not** identify the specific ARM64 method controlling the Duo's Chemistry dashboard. The IPA has no editable SwiftUI layout source/resource. Blind numeric patches are therefore not validated.
+
+New code: `PlumiDuoProbe.m` and `build-plumi-probe.yml`. GitHub Actions run [#44409944327](https://github.com/stride-praline-2f-ai/Sideinstaller-/actions/runs/44409944327) **passed** on macOS-26-intel; it compiles a read-only arm64 geometry probe. The probe is injected into the original user-provided IPA in the local container, with only its dylib load command and the status-bar plist keys modified. 86 embedded signatures are preserved and only stale root signing metadata is omitted. The original IPA is not published to this repository.
+
+The resulting **unsigned geometry diagnostic IPA** passed ZIP integrity and package-difference checks, SHA-256 `1a2f78707942ff3cea6e6e9e9a006316fda0b9679470a5f221a0d5d484552fb5`. It is **not a finished iPad-mini layout fix**. After Signulous signing, navigate to the clipped Chemistry dashboard, then use a **two-finger triple tap** to export `PlumiDuoGeometry.txt` from the system share sheet. The report includes window bounds, safe area, trait class and UIKit view frames only, not questions, user IDs or account data. Same-screen portrait and landscape screenshots are needed for comparison.
+
+No trait modification, device spoofing, SDK editing, system-level settings change or swizzling occurs in the diagnostic dylib. If installation or launch fails, revert to the untouched original IPA.
