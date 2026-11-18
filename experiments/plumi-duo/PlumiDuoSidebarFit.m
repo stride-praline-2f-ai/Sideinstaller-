@@ -23,6 +23,10 @@
 @property(nonatomic,assign) BOOL oldAlwaysBounceHorizontal;
 @property(nonatomic,assign) BOOL oldShowsHorizontalScrollIndicator;
 @property(nonatomic,assign) BOOL horizontalPanChanged;
+@property(nonatomic,strong) NSTimer *autoTimer;
+@property(nonatomic,weak) UIView *adjustedNav;
+@property(nonatomic,assign) CGAffineTransform originalNavTransform;
+@property(nonatomic,assign) BOOL navAdjusted;
 + (instancetype)shared;
 - (void)registerWindows;
 - (void)onNotification:(NSNotification *)notification;
@@ -39,6 +43,12 @@
 - (instancetype)init {
     if ((self=[super init])) {
         _observedWindows=[NSHashTable weakObjectsHashTable];
+        // v12: no action sheets, gestures, or manual activation.
+        __weak typeof(self) weakSelf=self;
+        _autoTimer=[NSTimer scheduledTimerWithTimeInterval:1.25 repeats:YES
+            block:^(__unused NSTimer *timer) {
+                [weakSelf autoTick];
+            }];
         NSNotificationCenter *nc=NSNotificationCenter.defaultCenter;
         [nc addObserver:self selector:@selector(onNotification:)
                    name:UIApplicationDidBecomeActiveNotification object:nil];
@@ -59,9 +69,21 @@
         if (!s.window || (scene && !UIInterfaceOrientationIsLandscape(scene.interfaceOrientation)))
             [self restore];
     }
-    [self registerWindows];
+    if (self.navAdjusted) {
+        UIView *nav=self.adjustedNav;
+        UIWindowScene *scene=nav.window.windowScene;
+        if (!nav.window || (scene &&
+            !UIInterfaceOrientationIsLandscape(scene.interfaceOrientation))) {
+            if (nav) nav.transform=self.originalNavTransform;
+            self.navAdjusted=NO;
+            self.adjustedNav=nil;
+        }
+    }
+    [self autoTick];
 }
 - (void)registerWindows {
+    // Completely disable the old triple-tap menu. There are no hidden controls.
+    return;
     if (![NSThread isMainThread]) {
         dispatch_async(dispatch_get_main_queue(),^{[self registerWindows];});
         return;
@@ -84,6 +106,76 @@
         }
     } @catch (NSException *e) {
         NSLog(@"[PlumiDuoSidebarFit] registration issue: %@",e.name);
+    }
+}
+// v12 targets the exact geometry supplied by the user, without altering
+// SwiftUI's own panel layout or changing iPad/iPhone identity.
+- (void)shiftTopNav:(UIView *)view window:(UIWindow *)window depth:(NSUInteger)depth {
+    if (!view || depth>18) return;
+    @try {
+        CGRect r=[view convertRect:view.bounds toView:window];
+        NSString *name=NSStringFromClass(view.class);
+        if ([name containsString:@"HostingScrollView"] &&
+            [name containsString:@"PlatformContainer"] &&
+            r.origin.y>60 && r.origin.y<100 &&
+            r.size.height>35 && r.size.height<65 &&
+            r.size.width>window.bounds.size.width*0.75 &&
+            r.size.width<window.bounds.size.width*1.1) {
+            CGFloat overflow=CGRectGetMaxX(r)-window.bounds.size.width;
+            if (overflow>6 && overflow<40 && !self.navAdjusted) {
+                self.adjustedNav=view;
+                self.originalNavTransform=view.transform;
+                self.navAdjusted=YES;
+                view.transform=CGAffineTransformTranslate(view.transform,-overflow,0);
+                return;
+            }
+        }
+        for (UIView *child in view.subviews)
+            [self shiftTopNav:child window:window depth:depth+1];
+    } @catch (NSException *e) {
+        NSLog(@"[PlumiDuoSidebarFit] nav adjustment skipped: %@",e.name);
+    }
+}
+- (void)autoTick {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(),^{[self autoTick];});
+        return;
+    }
+    if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"dev.plumi.app"] ||
+        UIDevice.currentDevice.userInterfaceIdiom!=UIUserInterfaceIdiomPhone ||
+        UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
+        [NSUserDefaults.standardUserDefaults boolForKey:@"PlumiDuoAutoFixDisabled"])
+        return;
+    NSOperatingSystemVersion os=NSProcessInfo.processInfo.operatingSystemVersion;
+    if (os.majorVersion!=27 || os.minorVersion!=2) return;
+    @try {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+            UIWindowScene *ws=(UIWindowScene *)scene;
+            if (!UIInterfaceOrientationIsLandscape(ws.interfaceOrientation)) continue;
+            for (UIWindow *w in ws.windows) {
+                if (w.hidden || w.bounds.size.width<910 ||
+                    w.bounds.size.width>995 || w.bounds.size.height<625 ||
+                    w.bounds.size.height>720) continue;
+                UIScrollView *candidate=[self target:w];
+                if (candidate) {
+                    if (candidate!=self.selectedScroll || !self.horizontalPanChanged) {
+                        [self enablePan:w];
+                    } else {
+                        if (!candidate.scrollEnabled) candidate.scrollEnabled=YES;
+                        if (!candidate.alwaysBounceHorizontal) candidate.alwaysBounceHorizontal=YES;
+                        if (!candidate.showsHorizontalScrollIndicator)
+                            candidate.showsHorizontalScrollIndicator=YES;
+                    }
+                }
+                [self shiftTopNav:w window:w depth:0];
+            }
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[PlumiDuoSidebarFit] disabled after auto-fit exception: %@",e.name);
+        [self.autoTimer invalidate];
+        self.autoTimer=nil;
+        @try { [self restore]; } @catch (__unused NSException *ignored) {}
     }
 }
 - (void)scan:(UIView *)view window:(UIWindow *)window depth:(NSUInteger)depth
@@ -323,9 +415,8 @@ __attribute__((constructor))
 static void PlumiDuoSidebarFitStart(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"dev.plumi.app"]) {
-            [[PlumiDuoSidebarFit shared] registerWindows];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC),
-               dispatch_get_main_queue(),^{[[PlumiDuoSidebarFit shared] registerWindows];});
+            [[PlumiDuoSidebarFit shared] autoTick];
+            // The timer keeps the right scroll region usable through SwiftUI view replacement.
         }
     });
 }
