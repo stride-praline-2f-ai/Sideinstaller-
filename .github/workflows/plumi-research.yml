@@ -1,0 +1,27 @@
+name: Plumi IPA research checks
+
+on:
+  push:
+    branches:
+      - research/plumi-duo-layout
+    paths:
+      - "experiments/plumi-duo/**"
+      - ".github/workflows/plumi-research.yml"
+  pull_request:
+    paths:
+      - "experiments/plumi-duo/**"
+      - ".github/workflows/plumi-research.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run synthetic IPA tests
+        working-directory: experiments/plumi-duo
+        run: python3 -m unittest -v
