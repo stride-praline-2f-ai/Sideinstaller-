@@ -1,26 +1,29 @@
 import Foundation
 
-/// Width-driven dashboard layout for the iPhone Duo and iPad mini.
-/// Reference implementation only; requires integration with Plumi's SwiftUI source.
+/// Source-level iPad mini-style responsive layout for iPhone Duo.
+/// This policy does NOT replace compiled SwiftUI views inside the Plumi IPA.
 public enum PlumiPaneMode: Equatable {
     case stacked
     case twoColumn(mainWidth: Double, sidebarWidth: Double)
 }
 
 public struct PlumiPanePolicy {
-    public var minimumMainWidth: Double = 460
-    public var minimumSidebarWidth: Double = 300
-    public var maximumSidebarWidth: Double = 350
-    public var sidebarFraction: Double = 0.33
-    public var spacing: Double = 20
+    /// Original Plumi's right-hand Chemistry content measured 376 points wide,
+    /// while its current Duo sidebar viewport is only 304.3 points wide.
+    public var minimumMainWidth: Double = 480
+    public var sidebarContentWidth: Double = 376
+    public var spacing: Double = 16
+
     public init() {}
+
+    /// Pass width AFTER subtracting the actual horizontal safe-area and margins.
     public func mode(availableWidth width: Double) -> PlumiPaneMode {
         guard width.isFinite, width > 0 else { return .stacked }
-        guard width >= minimumMainWidth + minimumSidebarWidth + spacing
-              else { return .stacked }
-        let side = min(maximumSidebarWidth, max(minimumSidebarWidth, width * sidebarFraction))
-        let main = width - side - spacing
-        return main >= minimumMainWidth
-            ? .twoColumn(mainWidth: main, sidebarWidth: side) : .stacked
+        let required = minimumMainWidth + sidebarContentWidth + spacing
+        guard width >= required else { return .stacked }
+        return .twoColumn(
+            mainWidth: width - sidebarContentWidth - spacing,
+            sidebarWidth: sidebarContentWidth
+        )
     }
 }
