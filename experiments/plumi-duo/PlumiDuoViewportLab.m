@@ -3,6 +3,7 @@
 // No global traits, SwiftUI device spoofing or private API.
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#include <math.h>
 
 @interface PlumiDuoViewportLab : NSObject
 @property(nonatomic,strong) NSHashTable<UIWindow *> *observedWindows;
@@ -34,10 +35,22 @@
                   name:UIWindowDidBecomeVisibleNotification object:nil];
         [nc addObserver:self selector:@selector(onNotice:)
                   name:UISceneDidActivateNotification object:nil];
+        [nc addObserver:self selector:@selector(onNotice:)
+                  name:UIDeviceOrientationDidChangeNotification object:nil];
+        [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
     }
     return self;
 }
-- (void)onNotice:(__unused NSNotification *)notice { [self registerWindows]; }
+- (void)onNotice:(__unused NSNotification *)notice {
+    if (self.hasAdjustment) {
+        UIWindow *window=self.adjustedView.window;
+        if (!window || (window.windowScene &&
+                        !UIInterfaceOrientationIsLandscape(window.windowScene.interfaceOrientation))) {
+            [self restore];
+        }
+    }
+    [self registerWindows];
+}
 - (void)registerWindows {
     if (![NSThread isMainThread]) {
         dispatch_async(dispatch_get_main_queue(), ^{ [self registerWindows]; });
@@ -103,6 +116,9 @@
     [self restore];
     UIView *v=[self findDashboardView:window inWindow:window depth:0];
     if (!v) return @"No oversized dashboard container is visible. Navigate to Chemistry first.";
+    if (!window.windowScene ||
+        !UIInterfaceOrientationIsLandscape(window.windowScene.interfaceOrientation))
+        return @"The experiment is only available in landscape.";
     @try {
         CGRect visible=[v convertRect:v.bounds toView:window];
         CGFloat usable=window.bounds.size.width-MAX(visible.origin.x,0);
