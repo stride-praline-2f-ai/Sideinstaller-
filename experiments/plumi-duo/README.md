@@ -125,3 +125,18 @@ An unsigned IPA has been produced locally using the user's original Plumi 1.2.13
 - output SHA-256 `909db3e170353e7df0cb99b28be1adf6716cc9d201cf81652c14a591abad9f95`
 
 **Still experimental:** Requires signing all injected code, launch testing on Duo, and observing whether the dashboard can be fitted without clipping or gesture issues. Revert with the original known-working IPA if anything fails.
+
+## v8 (18 Nov 2026): fix false 'No oversized dashboard' result
+
+The user installed v7 and reported the message **"No oversized dashboard container is visible"** while the Chemistry dashboard was visibly overflowing in landscape. This is the v7 heuristic failing, **not proof that Plumi stopped overflowing**.
+
+v8 changes in `PlumiDuoViewportLab.m`:
+- Allow the action sheet to finish dismissing before measuring the underlying UI (0.55-second delay after the user chooses Fit).
+- Broaden UIKit/SwiftUI wrapper detection: accept `HostingScrollView` and `PlatformContainer` wrappers with measured overflow; recurse deeper and avoid requiring both strings in the same class name.
+- Add **Export screen geometry report** to the two-finger triple-tap menu. When the fit still cannot locate a view, export the report for that same screen instead of reinstalling another diagnostic IPA.
+- Keep **Restore original layout** and the 85% user-selected fit. No automatic scaling, system-wide size-class overrides or iPad device spoofing.
+- Preserve the status-bar suppression from v5 and the original app/embedded framework resources.
+
+GitHub Actions macOS build **44413917646** compiled successfully. The unsigned v8 IPA was packaged locally from original Plumi 1.2.13 build 40. ZIP CRC and file-difference checks passed; all 86 nested signing entries were retained. Output SHA-256: `2dc8789b9625295e9063d7fed031d10bcfc256c54e42b0cd1b0969d535d08ce3`.
+
+**Still unverified:** Whether v8 now matches the actual Chemistry container or reveals the right panel; whether the view transform persists through SwiftUI re-layout. Do not market as an iPad mini native layout implementation.
