@@ -22,7 +22,7 @@ jobs:
           mkdir -p build
           xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=17.0 \
             -dynamiclib -fobjc-arc -fblocks \
-            -framework UIKit -framework Foundation \
+            -framework UIKit -framework Foundation -framework CoreGraphics \
             -install_name "@executable_path/Frameworks/PlumiDuoProbe.dylib" \
             -o build/PlumiDuoProbe.dylib experiments/plumi-duo/PlumiDuoProbe.m
           file build/PlumiDuoProbe.dylib
