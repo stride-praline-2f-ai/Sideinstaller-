@@ -163,3 +163,25 @@ No automatic sizing changes, no iPad-device spoofing, no system-wide trait overr
 Unsigned v9 IPA SHA-256: `2349eb342ad609be565f7eefdfac2a212fb76c4118899ad43e26b6cd1d66e10c`. Local archive/difference checks pass; 86 nested signatures preserved, two obsolete main-app signature entries omitted for re-signing. Output is **not tested on a Duo** and **not a native iPad mini reflow**. The upper navigation 22-point overflow is **not fixed in v9**.
 
 The original Plumi IPA remains the known working fallback.
+
+## v11 (18 November 2026): make actions clearly functional after v9 modal failure
+
+The user reported that **none of the v9 buttons worked**, including Restore. Screenshot showed two overlapping iOS alerts. The v9 failure had two causes:
+1. Detecting the view after presenting an action sheet changed its effective geometry and made the selection fail.
+2. Reporting errors with another `UIAlertController` produced a second blocking alert over the first.
+3. Restore never had any modification to undo, but still claimed that the original layout was restored.
+
+The latest `PlumiDuoSidebarFit.m` now:
+- Measures and retains a **weak reference to the sidebar before opening the menu**, along with its pre-menu content/viewport widths.
+- Shows the captured dimensions and current patch state in the menu.
+- **Disables Fit and Scroll when no matching target is available**, instead of allowing misleading failure actions.
+- **Disables Restore until an adjustment has actually been applied**, then restores original transforms/scroll settings.
+- Uses nonmodal, automatically disappearing labels for all results. No nested UIAlertControllers.
+- Schedules the action until after the menu closes.
+- Leaves Plumi unchanged at launch.
+
+On the prior measured screen, the intended target predicate matches **x=646.7, y=260.7, viewport=304.3, content=376.0 pt**. This is an expected match based on supplied data, not yet a live validation.
+
+GitHub macOS Intel compile passed: [run #44417162417](https://github.com/stride-praline-2f-ai/Sideinstaller-/actions/runs/44417162417).
+
+The resulting **unsigned v11 test IPA** was packaged locally from the known-working original 1.2.13 build 40 (no v9/v10 nesting) with the status-bar-hidden plist setting. Its SHA-256 is `13d1bbf188d519e7308326aa0300a9138daa4b0cce8fc27e3207956d0e843687`. Package CRC and file-difference checks passed; 86 nested signatures remain intact. This does not establish the behaviour on the phone, the desired iPad mini layout, or a signed build. The user must sign and test it on-device; revert to the original if anything fails.
