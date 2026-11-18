@@ -96,3 +96,32 @@ New code: `PlumiDuoProbe.m` and `build-plumi-probe.yml`. GitHub Actions run [#44
 The resulting **unsigned geometry diagnostic IPA** passed ZIP integrity and package-difference checks, SHA-256 `1a2f78707942ff3cea6e6e9e9a006316fda0b9679470a5f221a0d5d484552fb5`. It is **not a finished iPad-mini layout fix**. After Signulous signing, navigate to the clipped Chemistry dashboard, then use a **two-finger triple tap** to export `PlumiDuoGeometry.txt` from the system share sheet. The report includes window bounds, safe area, trait class and UIKit view frames only, not questions, user IDs or account data. Same-screen portrait and landscape screenshots are needed for comparison.
 
 No trait modification, device spoofing, SDK editing, system-level settings change or swizzling occurs in the diagnostic dylib. If installation or launch fails, revert to the untouched original IPA.
+
+## Targeted-width investigation from on-device report
+
+The user captured the Chemistry/dashboard in landscape on iOS 27.2.1:
+- UIWindow / scene: **951 × 669 pt** (safe-area top 0, bottom 34)
+- Horizontal size class **regular (2)**; no need to spoof tablet identity
+- Main SwiftUI HostingScrollView PlatformContainer at (0,211), **1,024.7 × 458 pt**
+- Its content width is 1,024.7 pt, and it extends **73.7 pt** beyond the 951-pt window
+- Upper navigation PlatformContainer starts x=64.7 with width 895.3, exceeding the window by 9.0 pt
+
+This supports a concrete **oversized SwiftUI container** diagnosis. It does not prove every private SwiftUI child view stays within 1,024.7 pt, and it does not prove the iPad mini layout can be directly enabled.
+
+### Plumi v7: per-view fit, user-controlled and reversible
+
+`PlumiDuoViewportLab.m` is an iPhone-only, `dev.plumi.app`-scoped experimental dylib, compiled on GitHub macOS (Actions run **44412336844**). It installs a two-finger **triple-tap** control. The default launch modifies **no layouts**. The user can apply either:
+- **Fit container to screen**, approximately 92.8% on the captured dashboard
+- **Tighter fit (85%)** if the right panel still extends beyond the edge
+- **Restore original layout** without reinstalling
+
+The shim targets only an oversized SwiftUI `HostingScrollView.PlatformContainer` below the dashboard heading, and applies a UIKit view transform (not a horizontal size-class or MobileGestalt override). It attempts automatic restore on rotation. This changes visual scale and may reduce text size; it is **not** native iPad mini SwiftUI reflow. A UI framework can reset the transform on later layout passes, so neither correctness nor durable fit is guaranteed without on-device testing.
+
+An unsigned IPA has been produced locally using the user's original Plumi 1.2.13 build 40, retaining status-bar hidden Info.plist flags. Checks verified:
+- ZIP CRC passes
+- exactly two existing files changed (main Mach-O load command, main Info.plist)
+- exactly one dylib added, two obsolete root-signature entries removed
+- all **86** nested signing entries preserved; no layouts, assets, app data or system files otherwise changed
+- output SHA-256 `909db3e170353e7df0cb99b28be1adf6716cc9d201cf81652c14a591abad9f95`
+
+**Still experimental:** Requires signing all injected code, launch testing on Duo, and observing whether the dashboard can be fitted without clipping or gesture issues. Revert with the original known-working IPA if anything fails.
