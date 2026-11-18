@@ -60,7 +60,9 @@
     NSOperatingSystemVersion os = NSProcessInfo.processInfo.operatingSystemVersion;
     if (os.majorVersion != 27 || os.minorVersion != 2) return;
     // Optional kill-switch in Plumi preferences; useful if an update breaks this shim.
-    if ([NSUserDefaults.standardUserDefaults boolForKey:@"PlumiDuoLayoutDisabled"]) return;
+    // Disabled by default after on-device evidence of broader landscape breakage.
+    // Opt in explicitly only during controlled development tests.
+    if (![NSUserDefaults.standardUserDefaults boolForKey:@"PlumiDuoLayoutExperimentalOptIn"]) return;
 
     // v4: Do NOT read traitOverrides.horizontalSizeClass to detect the original
     // value. On iOS 27.2.1 this getter threw an NSException on iPhone Duo.
