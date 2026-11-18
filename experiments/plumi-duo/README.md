@@ -74,3 +74,15 @@ Verified in local preflight: ZIP CRC passes, executable byte-identical to origin
 **Not verified:** The actual iOS status-bar visibility or Chemistry dashboard clipping after Signulous signing, and preservation of user app data on reinstall. Apple developer forums document unrelated cases where status-bar visibility changes altered navigation layout on some iOS versions; be prepared to revert if v5 performs worse.
 
 Do not label v5 a full Duo layout fix. Further work on the right-hand pane clipping must target actual Plumi SwiftUI view geometry, preferably with app source or a same-screen comparison.
+
+## iPad mini layout policy for iPhone Duo (source-level reference)
+
+The user requested preserving the iPad mini experience wherever it fits, while fixing the Chemistry dashboard's off-screen right pane. Static analysis of Plumi 1.2.13 found compiled app-defined pane layout tests referring to a **679-point iPad mini destination** and **469-point compact Settings destination**. Apple notes that iPhone Duo can report a regular horizontal size class without having iPad-sized space.
+
+A *source-level* candidate is now included in `source-reference/`:
+- `PlumiPanePolicy.swift`: choose split columns only when available safe-area-aware width fits a 460-point main pane, 300-point sidebar and 20-point spacing; otherwise stack.
+- `PlumiAdaptiveColumns.swift`: generic SwiftUI view using `GeometryReader` and `safeAreaPadding`, intended only for the Chemistry/dashboard pane, never a global size-class override.
+- `PlumiPanePolicyTests.swift`: 10 width-policy tests.
+- `.github/workflows/plumi-adaptive-columns.yml`: macOS Xcode iOS type-check and native policy tests; **passed in GitHub Actions run #44405578269**.
+
+The thresholds are **provisional** until the actual dashboard's SwiftUI content sizing is measured on device. No Plumi source code is accessible in the received compiled IPA, so **the reference view is not integrated into an installable Plumi IPA**. Do not distribute as a working fix or merge into the existing app. The last installable candidate remains v5 (status-bar-only); its on-device results are still unverified.
