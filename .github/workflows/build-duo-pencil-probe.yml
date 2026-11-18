@@ -1,0 +1,59 @@
+name: Build Duo Pencil diagnostic IPA
+
+on:
+  push:
+    branches:
+      - research/duo-pencil-compat
+    paths:
+      - "experiments/duo-pencil-probe/**"
+      - ".github/workflows/build-duo-pencil-probe.yml"
+  pull_request:
+    paths:
+      - "experiments/duo-pencil-probe/**"
+      - ".github/workflows/build-duo-pencil-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-app:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Generate project
+        working-directory: experiments/duo-pencil-probe
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen generate
+      - name: Build unsigned app
+        working-directory: experiments/duo-pencil-probe
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild -project DuoPencilProbe.xcodeproj \
+            -scheme DuoPencilProbe -configuration Release \
+            -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO build
+          test -d build/Build/Products/Release-iphoneos/DuoPencilProbe.app
+      - name: Package IPA
+        working-directory: experiments/duo-pencil-probe
+        run: |
+          set -euo pipefail
+          mkdir -p dist/Payload
+          cp -R build/Build/Products/Release-iphoneos/DuoPencilProbe.app dist/Payload/
+          (cd dist && zip -qry DuoPencilProbe-unsigned.ipa Payload)
+          unzip -t dist/DuoPencilProbe-unsigned.ipa
+          shasum -a 256 dist/DuoPencilProbe-unsigned.ipa > dist/DuoPencilProbe-unsigned.ipa.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DuoPencilProbe-unsigned-IPA
+          path: |
+            experiments/duo-pencil-probe/dist/DuoPencilProbe-unsigned.ipa
+            experiments/duo-pencil-probe/dist/DuoPencilProbe-unsigned.ipa.sha256
+          if-no-files-found: error
+          retention-days: 14
