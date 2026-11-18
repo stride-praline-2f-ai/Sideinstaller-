@@ -1,0 +1,35 @@
+name: Build Plumi Duo read-only geometry probe
+on:
+  push:
+    branches: [research/plumi-duo-layout]
+    paths:
+      - "experiments/plumi-duo/PlumiDuoProbe.m"
+      - ".github/workflows/build-plumi-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile iPhone arm64 geometry probe
+        run: |
+          set -euxo pipefail
+          mkdir -p build
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=17.0 \
+            -dynamiclib -fobjc-arc -fblocks \
+            -framework UIKit -framework Foundation \
+            -install_name "@executable_path/Frameworks/PlumiDuoProbe.dylib" \
+            -o build/PlumiDuoProbe.dylib experiments/plumi-duo/PlumiDuoProbe.m
+          file build/PlumiDuoProbe.dylib
+          xcrun otool -L build/PlumiDuoProbe.dylib
+          shasum -a 256 build/PlumiDuoProbe.dylib > build/PlumiDuoProbe.dylib.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plumi-readonly-geometry-probe
+          path: build/PlumiDuoProbe*
+          retention-days: 7
