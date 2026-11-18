@@ -261,35 +261,50 @@
         UIViewController *p=[self presenter:window];
         if (!p) return;
         NSString *summary=captured ?
-            [NSString stringWithFormat:@"Right panel detected before opening menu: %.1f pt content / %.1f pt viewport (%.1f pt overflow). No changes until you select an option.",
+            [NSString stringWithFormat:@"Right panel measured: %.1f pt content / %.1f pt viewport, overflow %.1f pt. Current state: %@.",
                 self.menuContentWidth,self.menuViewportWidth,
-                self.menuContentWidth-self.menuViewportWidth] :
-            @"No matching right-hand scroll view before opening the menu. No changes will be applied.";
+                self.menuContentWidth-self.menuViewportWidth,
+                self.isFitted ? @"visual fit" : (self.horizontalPanChanged ? @"horizontal scrolling" : @"original")] :
+            @"No matching right-hand scroll view. Fit and horizontal scrolling are disabled to avoid misleading error pop-ups.";
         UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"Plumi Duo · Right Panel"
             message:summary
             preferredStyle:UIAlertControllerStyleActionSheet];
         __weak typeof(self) weakSelf=self;
-        [menu addAction:[UIAlertAction actionWithTitle:@"Fit right panel content"
+        UIAlertAction *fitAction=[UIAlertAction actionWithTitle:@"Fit right panel content"
             style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.55*NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     NSString *result=[weakSelf fit:window];
                     [weakSelf feedback:result window:window];
                 });
-            }]];
-        [menu addAction:[UIAlertAction actionWithTitle:@"Allow right panel horizontal scrolling"
+            }];
+        UIAlertAction *panAction=[UIAlertAction actionWithTitle:@"Allow right panel horizontal scrolling"
             style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.55*NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     NSString *result=[weakSelf enablePan:window];
                     [weakSelf feedback:result window:window];
                 });
-            }]];
-        [menu addAction:[UIAlertAction actionWithTitle:@"Restore original"
+            }];
+        UIAlertAction *restoreAction=[UIAlertAction actionWithTitle:@"Restore original"
             style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                BOOL hadAdjustment=(weakSelf.isFitted || weakSelf.horizontalPanChanged);
                 [weakSelf restore];
-                [weakSelf feedback:@"Original sidebar view restored." window:window];
-            }]];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.55*NSEC_PER_SEC)),
+                    dispatch_get_main_queue(), ^{
+                    [weakSelf feedback:(hadAdjustment ?
+                        @"Original sidebar settings restored." :
+                        @"Nothing to restore: this version has not changed the sidebar.")
+                        window:window];
+                });
+            }];
+        // Do not present apparently-working buttons if the screen probe failed.
+        fitAction.enabled=(captured!=nil);
+        panAction.enabled=(captured!=nil);
+        restoreAction.enabled=(self.isFitted || self.horizontalPanChanged);
+        [menu addAction:fitAction];
+        [menu addAction:panAction];
+        [menu addAction:restoreAction];
         [menu addAction:[UIAlertAction actionWithTitle:@"Cancel"
             style:UIAlertActionStyleCancel handler:nil]];
         UIPopoverPresentationController *pop=menu.popoverPresentationController;
