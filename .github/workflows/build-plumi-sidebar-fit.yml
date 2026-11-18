@@ -1,0 +1,37 @@
+name: Build Plumi Duo Sidebar Fit Experiment
+on:
+  push:
+    branches: [research/plumi-duo-layout]
+    paths:
+      - "experiments/plumi-duo/PlumiDuoSidebarFit.m"
+      - ".github/workflows/build-plumi-sidebar-fit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: macos-26-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile iOS arm64 reversible sidebar tool
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p build
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=17.0 \
+            -dynamiclib -fobjc-arc -fblocks \
+            -framework UIKit -framework Foundation -framework CoreGraphics \
+            -install_name "@executable_path/Frameworks/PlumiDuoSidebarFit.dylib" \
+            -o build/PlumiDuoSidebarFit.dylib \
+            experiments/plumi-duo/PlumiDuoSidebarFit.m
+          file build/PlumiDuoSidebarFit.dylib
+          xcrun otool -L build/PlumiDuoSidebarFit.dylib
+          shasum -a 256 build/PlumiDuoSidebarFit.dylib > build/PlumiDuoSidebarFit.dylib.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plumi-duo-sidebar-fit
+          path: build/PlumiDuoSidebarFit.*
+          retention-days: 7

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "bundleIdentifier": "dev.plumi.app",
+  "aliases": [],
+  "name": "Plumi (inspection only)",
+  "supportedBuilds": [
+    {
+      "version": "1.2.13",
+      "build": "40"
+    }
+  ],
+  "fullModeDefaultBars": "default",
+  "supportedFullModeBars": [
+    "default"
+  ],
+  "plannedChanges": [
+    "Do not reapply SDK 27.2 or UIDeviceFamily [1,2]: already present.",
+    "Investigate Plumi SwiftUI layout thresholds for Duo display; do not fabricate a scene manifest.",
+    "Require per-app device runtime validation before marking any layout patch as supported."
+  ],
+  "patchUnavailableReason": "No verified Plumi-specific SwiftUI layout bridge. Generic patcher requires an explicit scene configuration absent from this IPA."
+}
