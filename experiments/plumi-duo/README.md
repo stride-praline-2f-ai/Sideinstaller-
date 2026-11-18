@@ -193,3 +193,19 @@ Goal: retain Plumi's iPad-style navigation and **two-column** Chemistry dashboar
 The updated source-only `PlumiPanePolicy.swift` now uses **376-point sidebar**, **480-point minimum main pane** and **16-point gap**, subtracting **16-point outer margins** each side. At the measured 951-point Duo width, this yields **527-point main pane + 376-point sidebar + 16 gap + 32 margins**. At 744-point iPad mini portrait, it becomes stacked. On 1133-point landscape it is two-column.
 
 This is a precise **source-level** responsive-layout design, not a compiled-Plumi binary patch. The received IPA contains no editable Plumi dashboard source. Do **not** claim it is installed or working on the Duo. Using a global iPad idiom or width-class override was already tested and worsened Plumi; those approaches remain excluded. The original app is intentionally untouched.
+
+## v12 (18 Nov 2026): automatic, Duo-sized partial workaround (not native iPad mini)
+
+User requested an installable fixed IPA with no broken buttons. Since Plumi is currently available to us only as a compiled iPad-oriented IPA, **the desired native iPad-mini layout reflow still cannot be implemented from the source-only reference files**. v12 is an independent app-only attempt to make the known clipping areas usable, without reusing failed size-class overrides.
+
+Changes to `PlumiDuoSidebarFit.m`:
+- No more triple-tap menu or blocking alerts. A lightweight 1.25-second timer automatically checks visible Plumi windows.
+- Restricted to `dev.plumi.app`, `UIUserInterfaceIdiomPhone`, iOS 27.2.x and an unfolded landscape window approximately 951×669 points.
+- For a right-side UIScrollView matching the measured region (x646.7,y260.7,viewport304.3,content376), automatically enable horizontal scrolling/bounce/indicator. This makes extra content potentially reachable **without claiming all 376 points display at once**.
+- For the narrow top navigation container, attempt to shift it left by a measured overflow of about 22 points.
+- Preserve the old scrolling state and navigation transform for restoration in portrait. A UserDefaults key `PlumiDuoAutoFixDisabled` can disable modifications when set true.
+- Do not change the app's SwiftUI view structure, other screens, scene size classes, device identity, or backend/authentication.
+
+GitHub compile: [run 44420648071](https://github.com/stride-praline-2f-ai/Sideinstaller-/actions/runs/44420648071) passed. The unsigned IPA was built **from the original 1.2.13 build 40**, not from v11. SHA-256: `45c2a9c6e6e7aecdc271bcbfdf522143586ba700acde15cd6997be01f53a45f0`. ZIP CRC, binary/Info.plist difference scope, compiled library identity and the 86 preserved nested signatures all passed. The library was tested only for compilation, not on the user's physical Duo. Requires complete Signulous re-signing.
+
+**Do not advertise v12 as a fully fixed native Plumi Duo layout.** The right-hand sidebar should be swipeable if SwiftUI allows UIKit horizontal scrolling, but its content remains wider than its view. A true two-pane 527/376pt redesign needs Plumi's SwiftUI dashboard source or an independently validated equivalent.
