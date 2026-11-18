@@ -1,22 +1,34 @@
 import Foundation
 
 let policy = PlumiPanePolicy()
-func check(_ width: Double, _ two: Bool) {
-    switch policy.mode(availableWidth: width) {
-    case .stacked: precondition(!two, "Unexpected stacked mode at \(width)")
+
+func check(_ windowWidth: Double, expectedTwoColumns: Bool) {
+    // In the reference SwiftUI component, 16pt margins apply on each side.
+    let available = windowWidth - 32
+    switch policy.mode(availableWidth: available) {
+    case .stacked:
+        precondition(!expectedTwoColumns, "Unexpected stacked mode at \(windowWidth)")
     case .twoColumn(let main, let side):
-        precondition(two, "Unexpected two columns at \(width)")
-        precondition(main >= 460 && side >= 300 && main + side + 20 <= width + 0.01)
+        precondition(expectedTwoColumns, "Unexpected two columns at \(windowWidth)")
+        precondition(main >= 480)
+        precondition(side >= 376)
+        precondition(abs(main + side + 16 + 32 - windowWidth) < 0.001)
+        if windowWidth == 951 {
+            precondition(main == 527 && side == 376,
+                         "Duo target must preserve 376pt sidebar within 951pt")
+        }
     }
 }
-check(0, false)
-check(469, false)
-check(679, false)
-check(727, false)
-check(779, false)
-check(780, true)
-check(834, true)
-check(1024, true)
-check(.nan, false)
-check(.infinity, false)
-print("All 10 width policy tests passed.")
+check(0, expectedTwoColumns: false)
+check(393, expectedTwoColumns: false)
+check(469, expectedTwoColumns: false)
+check(679, expectedTwoColumns: false)
+check(744, expectedTwoColumns: false) // iPad mini portrait
+check(903, expectedTwoColumns: false)
+check(904, expectedTwoColumns: true) // exact minimum for split
+check(951, expectedTwoColumns: true) // measured Duo inner landscape
+check(1024, expectedTwoColumns: true)
+check(1133, expectedTwoColumns: true) // iPad mini landscape reference
+check(.nan, expectedTwoColumns: false)
+check(.infinity, expectedTwoColumns: false)
+print("All 12 Duo/iPad mini geometry tests passed.")
