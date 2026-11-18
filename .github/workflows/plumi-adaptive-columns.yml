@@ -1,0 +1,32 @@
+name: Plumi adaptive columns source check
+
+on:
+  push:
+    branches: [research/plumi-duo-layout]
+    paths:
+      - "experiments/plumi-duo/source-reference/**"
+      - ".github/workflows/plumi-adaptive-columns.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: macos-26-intel
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test width policy in native Swift
+        working-directory: experiments/plumi-duo/source-reference
+        run: |
+          set -euo pipefail
+          cat PlumiPanePolicy.swift PlumiPanePolicyTests.swift > /tmp/PlumiPolicyTest.swift
+          swift /tmp/PlumiPolicyTest.swift
+      - name: Typecheck SwiftUI dashboard component for iOS
+        working-directory: experiments/plumi-duo/source-reference
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun swiftc -typecheck -sdk "$SDK" -target arm64-apple-ios17.0 \
+            PlumiPanePolicy.swift PlumiAdaptiveColumns.swift
