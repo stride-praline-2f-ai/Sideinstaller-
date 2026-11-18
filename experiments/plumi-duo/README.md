@@ -140,3 +140,26 @@ v8 changes in `PlumiDuoViewportLab.m`:
 GitHub Actions macOS build **44413917646** compiled successfully. The unsigned v8 IPA was packaged locally from original Plumi 1.2.13 build 40. ZIP CRC and file-difference checks passed; all 86 nested signing entries were retained. Output SHA-256: `2dc8789b9625295e9063d7fed031d10bcfc256c54e42b0cd1b0969d535d08ce3`.
 
 **Still unverified:** Whether v8 now matches the actual Chemistry container or reveals the right panel; whether the view transform persists through SwiftUI re-layout. Do not market as an iPad mini native layout implementation.
+
+## v9 (18 November 2026): diagnosis refined from latest user report
+
+The user supplied an on-device screenshot and a new, same-screen v8 geometry report (window **951 × 669 pt**):
+
+- Right sidebar: `SwiftUI.HostingScrollView` at **x=646.7, y=260.7, width=304.3, height=246.1 pt**.
+- Its **contentSize.width=376.0 pt**, overflowing its viewport by **71.7 pt** (scale-to-fit ratio **304.3/376.0 = 0.8093**).
+- The nested `PlatformGroupContainer` itself is **304.3 pt** wide and **474.3 pt** high, so a search for *view frame wider than the entire screen* cannot match this problem.
+- Separate upper navigation scroll view at **x=77.7, y=77, width=895.3 pt** extends **22.0 pt** beyond the window (but reports contentSize.width=213.7; this is a separate issue).
+- Left-hand scroll host x=44 y=638.7 width566.7 contentWidth566.7 does not have horizontal content overflow.
+
+**New artifact: `PlumiDuoSidebarFit.m`** compiled successfully on macOS in [Actions run #44415214541](https://github.com/stride-praline-2f-ai/Sideinstaller-/actions/runs/44415214541).
+
+v9 detects a right-side UIScrollView from actual `contentSize.width > bounds.width + 20`, rather than misidentifying the whole SwiftUI host. Only after a two-finger triple-tap does the user choose to:
+1. Visually scale its inner `PlatformGroupContainer` to approximately **80.9%**, with a reversible transform.
+2. Enable horizontal scrolling within that right panel instead, without shrinking its text.
+3. Restore the original state.
+
+No automatic sizing changes, no iPad-device spoofing, no system-wide trait overrides. The main Plumi SwiftUI executable remains functionally unchanged apart from the added library load command. Status-bar-hidden Info.plist flags are retained.
+
+Unsigned v9 IPA SHA-256: `2349eb342ad609be565f7eefdfac2a212fb76c4118899ad43e26b6cd1d66e10c`. Local archive/difference checks pass; 86 nested signatures preserved, two obsolete main-app signature entries omitted for re-signing. Output is **not tested on a Duo** and **not a native iPad mini reflow**. The upper navigation 22-point overflow is **not fixed in v9**.
+
+The original Plumi IPA remains the known working fallback.
