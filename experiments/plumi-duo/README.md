@@ -30,3 +30,19 @@ The strongest lead is the app's own pane-width and two-column logic. A system-wi
 - No copyrighted Plumi executable, user data, IPA, private provisioning profiles or signing certificates.
 
 **No working Plumi fix is claimed.** Building and distributing an untested binary merely because its metadata changes would not be useful.
+
+## 18 Nov 2026: runtime crash and hardening revision (v4)
+
+The user's iOS 27.2.1 crash report shows `SIGABRT` in `-[PlumiDuoLayoutController refresh]` when UIKit calls `-[_UITraitOverrides _valueForNSIntegerTraitToken:]`. The prior shim read `overrides.horizontalSizeClass` **before defining an override**. Apple documents that reading an unset override raises an exception. This is a confirmed runtime error rather than a signing/loading failure: the report includes our dylib in `usedImages`.
+
+Fixes implemented in `PlumiDuoLayout.m`:
+- Never read an unset `UITraitOverrides.horizontalSizeClass` value.
+- Detect existing per-scene trait overrides with `containsTrait:`, and remove only those installed by our shim.
+- Catch Objective-C exceptions, disable the shim, and attempt safe rollback.
+- Correct notification selectors to accept the notification parameter and use a weak timer capture.
+- Guard app bundle ID, iPhone idiom, iOS 27.2.x, active/foreground window scenes, and landscape orientation.
+- Add a preferences kill-switch, `PlumiDuoLayoutDisabled` (read on launch).
+
+The macOS Intel build passed and compiled an arm64 dylib. A locally built unsigned IPA using the user's original Plumi 1.2.13 retains all 86 nested signing entries, omits only two obsolete main-app signing entries, modifies only the executable and adds one dylib. Archive CRC validation succeeded. The user's IPA is **not** committed to GitHub.
+
+**Important:** The fix is not proven on-device. A successfully compiled dylib and structurally valid IPA do not establish that the SwiftUI overlap has been fixed or that every runtime path is crash-free. A new signed-on-device test is still required.
