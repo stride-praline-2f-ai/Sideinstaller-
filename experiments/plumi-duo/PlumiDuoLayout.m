@@ -10,7 +10,7 @@
 #import <Foundation/Foundation.h>
 
 @interface PlumiDuoLayoutController : NSObject
-@property (nonatomic, strong) NSMapTable<UIWindowScene *, NSNumber *> *previousOverrides;
+@property (nonatomic, assign) BOOL disabledAfterException;
 @property (nonatomic, strong) NSHashTable<UIWindowScene *> *activeOverrides;
 @property (nonatomic, strong) NSTimer *timer;
 + (instancetype)shared;
@@ -28,7 +28,6 @@
 
 - (instancetype)init {
     if ((self = [super init])) {
-        _previousOverrides = [NSMapTable weakToStrongObjectsMapTable];
         _activeOverrides = [NSHashTable weakObjectsHashTable];
         NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
         [center addObserver:self selector:@selector(refresh) name:UIApplicationDidBecomeActiveNotification object:nil];
@@ -52,28 +51,42 @@
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"dev.plumi.app"]) return;
     if (UIDevice.currentDevice.userInterfaceIdiom != UIUserInterfaceIdiomPhone) return;
 
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if (![scene isKindOfClass:UIWindowScene.class]) continue;
-        UIWindowScene *windowScene = (UIWindowScene *)scene;
-        if (@available(iOS 17.0, *)) {
-            id<UITraitOverrides> overrides = windowScene.traitOverrides;
-            BOOL isLandscape = UIInterfaceOrientationIsLandscape(windowScene.interfaceOrientation);
-            BOOL applied = [self.activeOverrides containsObject:windowScene];
-            if (isLandscape && !applied) {
-                // Preserve Plumi's prior override (including .unspecified), if any.
-                [self.previousOverrides setObject:@(overrides.horizontalSizeClass) forKey:windowScene];
-                overrides.horizontalSizeClass = UIUserInterfaceSizeClassCompact;
-                [self.activeOverrides addObject:windowScene];
-            } else if (!isLandscape && applied) {
-                NSNumber *previous = [self.previousOverrides objectForKey:windowScene];
-                if (overrides.horizontalSizeClass == UIUserInterfaceSizeClassCompact) {
-                    overrides.horizontalSizeClass =
-                        previous ? (UIUserInterfaceSizeClass)previous.integerValue : UIUserInterfaceSizeClassUnspecified;
+    // v3: Do NOT read traitOverrides.horizontalSizeClass to detect the original
+    // value. On iOS 27.2.1 this getter threw an NSException on iPhone Duo.
+    // Check only whether a trait is explicitly overridden, and remove only
+    // overrides installed by *this* shim. Never overwrite an app-owned value.
+    if (self.disabledAfterException) return;
+    @try {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+            if (@available(iOS 17.0, *)) {
+                id<UITraitOverrides> overrides = windowScene.traitOverrides;
+                BOOL isLandscape = UIInterfaceOrientationIsLandscape(windowScene.interfaceOrientation);
+                BOOL applied = [self.activeOverrides containsObject:windowScene];
+                if (isLandscape && !applied) {
+                    // Leave Plumi's own override completely alone if present.
+                    if ([overrides containsTrait:UITraitHorizontalSizeClass.class]) continue;
+                    overrides.horizontalSizeClass = UIUserInterfaceSizeClassCompact;
+                    [self.activeOverrides addObject:windowScene];
+                } else if (!isLandscape && applied) {
+                    [overrides removeTrait:UITraitHorizontalSizeClass.class];
+                    [self.activeOverrides removeObject:windowScene];
                 }
-                [self.previousOverrides removeObjectForKey:windowScene];
-                [self.activeOverrides removeObject:windowScene];
             }
         }
+    } @catch (NSException *exception) {
+        NSLog(@"[PlumiDuoLayout] Disabled after UIKit trait exception: %@", exception);
+        self.disabledAfterException = YES;
+        // Best effort: undo only this shim's overrides. Never rethrow.
+        for (UIWindowScene *windowScene in self.activeOverrides.allObjects) {
+            @try {
+                [windowScene.traitOverrides removeTrait:UITraitHorizontalSizeClass.class];
+            } @catch (__unused NSException *restoreException) {}
+        }
+        [self.activeOverrides removeAllObjects];
+        [self.timer invalidate];
+        self.timer = nil;
     }
 }
 
