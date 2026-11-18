@@ -58,3 +58,19 @@ The user tested v4 on iPhone Duo and shared two screenshots: the new build's sub
 - On this research branch, the shim now defaults to **no changes**; opting into the old global experiment requires `PlumiDuoLayoutExperimentalOptIn = YES` in app preferences. This opt-in is for controlled development only, not users.
 - Do not publish further layout IPAs without same-screen comparison and a narrower patch backed by actual observations.
 - Further work should target Plumi's app-defined pane widths or safe-area/insets at the affected screen, ideally with app source or an isolated view implementation. A generic iPad identity or size-class spoof is not a confirmed solution.
+
+## v5: status bar only (conservative on-device test)
+
+User requested hiding the iOS status overlay (clock, Wi-Fi, battery) visible over Plumi navigation on the iPhone Duo. The v4 global compact-size-class shim was unsuccessful and is **not** included. The v5 IPA is built from the user's previously working **original** Plumi 1.2.13 build 40 IPA, not from any patched variant.
+
+Changes:
+- Set `UIStatusBarHidden = YES` and `UIViewControllerBasedStatusBarAppearance = NO` in Plumi's main `Info.plist`.
+- Preserve `UIDeviceFamily=[1,2]`, SDK metadata, orientation support, scene lifecycle, all assets, original executable and 86 embedded code-signature entries.
+- Remove only two invalidated **main app** signature entries for complete re-signing by the user's installer.
+- No injected dylib, no UIWindowScene trait overrides, no MobileGestalt or global device changes.
+
+Verified in local preflight: ZIP CRC passes, executable byte-identical to original, no other file-content changes, three synthetic build tests pass. Expected unsigned IPA SHA-256: `bf2836e671cf3e5420d017a9ae4358a7ddbe1557738a9f255a37767eef700d83`.
+
+**Not verified:** The actual iOS status-bar visibility or Chemistry dashboard clipping after Signulous signing, and preservation of user app data on reinstall. Apple developer forums document unrelated cases where status-bar visibility changes altered navigation layout on some iOS versions; be prepared to revert if v5 performs worse.
+
+Do not label v5 a full Duo layout fix. Further work on the right-hand pane clipping must target actual Plumi SwiftUI view geometry, preferably with app source or a same-screen comparison.
