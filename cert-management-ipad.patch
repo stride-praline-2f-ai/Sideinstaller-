@@ -1,0 +1,108 @@
+diff --git a/ios-app/PersonalIPadView.swift b/ios-app/PersonalIPadView.swift
+--- a/ios-app/PersonalIPadView.swift
++++ b/ios-app/PersonalIPadView.swift
+@@ -7,9 +7,10 @@
+     @State private var pickingIPA = false
+     @State private var confirmingForget = false
+     @State private var removingRefreshCopy: IPadRefreshApp?
+     @State private var editingAccount: AccountEditorTarget?
+     @State private var shownTwoFactor: TwoFactorPhase?
++    @State private var showingCertificates = false
+ 
+     var body: some View {
+         NavigationStack {
+             ScrollView {
+@@ -46,9 +47,12 @@
+             .ignoresSafeArea()
+         }
+         .sheet(item: $editingAccount) { target in
+             AccountEditor(target: target, isPersonalIPadBuild: true)
+         }
++        .sheet(isPresented: $showingCertificates) {
++            PersonalIPadCertificatesView()
++        }
+         .sheet(isPresented: Binding(
+             get: { engine.twoFactor != nil },
+             set: { if !$0, let phase = engine.twoFactor { engine.cancelTwoFactor(phase) } }
+         )) {
+@@ -128,9 +132,16 @@
+             } label: {
+                 Label(accounts.active?.normalized ?? "Add signing Apple Account", systemImage: "person.crop.circle")
+             }
+             .buttonStyle(SecondaryButtonStyle())
+ 
++
++            Button {
++                showingCertificates = true
++            } label: {
++                Label("Manage signing certificates", systemImage: "checkmark.seal")
++            }
++            .buttonStyle(SecondaryButtonStyle())
+             if manager.customIPA != nil {
+                 Toggle("Request Increased Memory Limit", isOn: $manager.requestIncreasedMemory)
+             }
+ 
+@@ -267,5 +278,63 @@
+                 .buttonStyle(PrimaryButtonStyle())
+             }
+         }
+     }
+ }
++
++/// Uses SideInstaller's existing developer-portal certificate manager rather than
++/// silently revoking certificates when Apple returns error 7460.
++private struct PersonalIPadCertificatesView: View {
++    @Environment(Engine.self) private var engine
++    @EnvironmentObject private var accounts: AccountStore
++    @Environment(\.dismiss) private var dismiss
++    @StateObject private var certificates = CertManager()
++    @State private var shownTwoFactor: TwoFactorPhase?
++
++    var body: some View {
++        NavigationStack {
++            VStack(alignment: .leading, spacing: 0) {
++                Text("Review the certificates for your selected Apple Account. Revoking one will stop apps signed with it from launching, including on other devices. If you revoke the old certificate, return to Install on iPad and tap Install: a replacement will be requested automatically.")
++                    .font(.footnote)
++                    .foregroundStyle(.secondary)
++                    .fixedSize(horizontal: false, vertical: true)
++                    .padding(.horizontal, 20)
++                    .padding(.top, 12)
++
++                if let error = certificates.lastError {
++                    Label(error, systemImage: "exclamationmark.triangle")
++                        .font(.footnote)
++                        .foregroundStyle(Theme.warning)
++                        .padding(.horizontal, 20)
++                        .padding(.top, 8)
++                }
++                if let success = certificates.lastSuccess {
++                    Label(success, systemImage: "checkmark.circle")
++                        .font(.footnote)
++                        .foregroundStyle(Theme.positive)
++                        .padding(.horizontal, 20)
++                        .padding(.top, 8)
++                }
++                CertsView(manager: certificates)
++            }
++            .navigationTitle("Signing certificates")
++            .navigationBarTitleDisplayMode(.inline)
++            .toolbar {
++                ToolbarItem(placement: .topBarTrailing) {
++                    Button("Done") { dismiss() }
++                }
++            }
++        }
++        .onChange(of: accounts.revision) { _, _ in certificates.signOut() }
++        .sheet(isPresented: Binding(
++            get: { engine.twoFactor != nil },
++            set: { if !$0, let phase = engine.twoFactor { engine.cancelTwoFactor(phase) } }
++        )) {
++            if let phase = engine.twoFactor ?? shownTwoFactor {
++                TwoFactorSheet(phase: phase)
++            }
++        }
++        .onChange(of: engine.twoFactor) { _, phase in
++            if let phase { shownTwoFactor = phase }
++        }
++    }
++}
