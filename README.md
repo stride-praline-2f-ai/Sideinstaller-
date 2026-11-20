@@ -9,3 +9,9 @@ Based on [SideInstaller by FrizzleM](https://github.com/FrizzleM/SideInstaller) 
 Open **Actions → Build Install on iPad**. The workflow fetches the pinned upstream revision, applies the source patch, and builds an unsigned IPA with Xcode 27.2 or newer. Download **Install-on-iPad** from the run artifacts and extract `Install-on-iPad.ipa`. Sign the IPA for the iPhone with Signulous. Use the same signing Apple Account on subsequent iPad app refreshes.
 
 For local building and device setup, see `BUILD-INSTALL-ON-IPAD.md` in the patched source tree.
+
+## November 20, 2026: Apple GSA 503 compatibility build (v1.1.2)
+
+The build workflow now applies [auth-503-hotfix.patch](auth-503-hotfix.patch) after the dedicated iPad installer patch. The hotfix changes the Rust GrandSlam macOS-ADI client identity and the two-factor Mac fallback from the `<macOS;...>` spelling to a `<Mac OS X;27.2;26B118>` client-info profile reported to work with Apple's GSA edge on November 20. This is a **provisional compatibility workaround**, not proof that Apple sign-in has been restored on every account or anisette server. The original source is pinned and the hotfix is separate so it can be removed cleanly when upstream addresses the issue.
+
+Use **Actions → Build Install on iPad** and download the `Install-on-iPad` artifact from a **successful** v1.1.2 run. Sign it with the same signing certificate and bundle identifier as the app already installed on the iPhone, and update **in place** to preserve remembered pairing and locally saved refresh archives. Do not uninstall the existing app merely to try this authentication fix. Do not share full sign-in logs, tokens, pairing files or credentials publicly.
