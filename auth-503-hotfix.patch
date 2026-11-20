@@ -1,0 +1,37 @@
+# Temporary Apple GSA 503 compatibility hotfix for the pinned SideInstaller v2.0.1 source.
+# Based on community reports on 2026-11-20; requires live-device validation.
+diff --git a/rust-core/vendor/isideload/src/anisette/remote_v3/mod.rs b/rust-core/vendor/isideload/src/anisette/remote_v3/mod.rs
+--- a/rust-core/vendor/isideload/src/anisette/remote_v3/mod.rs
++++ b/rust-core/vendor/isideload/src/anisette/remote_v3/mod.rs
+@@ -64,8 +64,8 @@
+ /// takes it on a macOS-ADI identity (-20970 for a made-up account, 2026-10-23),
+ /// including for provisioning.
+ pub const CURRENT_MAC_CLIENT_INFO: &str =
+-    "<MacBookPro18,3> <macOS;26.6;25F84> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
++    "<MacBookPro13,3> <Mac OS X;27.2;26B118> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
+-const CURRENT_MAC_USER_AGENT: &str = "AuthKit/1 (Macintosh; OS X 26.6) (com.apple.akd/1.0)";
++const CURRENT_MAC_USER_AGENT: &str = "akd/1.0 CFNetwork/811.5.4 Darwin/16.7.0";
+ 
+ /// Device and OS of the stock client info of anisette-v3-server and of
+ /// AltServer/omnisette. Servers hand these out whatever library they run, and
+@@ -882,7 +882,7 @@
+     #[test]
+     fn mac_versions_are_read_from_either_spelling() {
+         assert_eq!(mac_version(SIERRA_MAC), Some((10, 12)));
+-        assert_eq!(mac_version(CURRENT_MAC_CLIENT_INFO), Some((26, 6)));
++        assert_eq!(mac_version(CURRENT_MAC_CLIENT_INFO), Some((27, 2)));
+         assert_eq!(mac_version("<Mac15,7> <macOS;27.0;26A5378j> <x>"), Some((27, 0)));
+         assert_eq!(mac_version("<iMac21,1> <macOS;15;24A335> <x>"), Some((15, 0)));
+         assert_eq!(mac_version(WINDOWS_CLIENT_INFO), None);
+diff --git a/rust-core/vendor/isideload/src/auth/grandslam.rs b/rust-core/vendor/isideload/src/auth/grandslam.rs
+--- a/rust-core/vendor/isideload/src/auth/grandslam.rs
++++ b/rust-core/vendor/isideload/src/auth/grandslam.rs
+@@ -33,7 +33,7 @@
+ ///   Mac on those pages alone is a mix Apple can close. `AppleAccount` falls
+ ///   back to the Mac on a bare 403.
+ const MAC_CLIENT_INFO: &str =
+-    "<Mac15,7> <macOS;27.0;26A5378j> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
++    "<MacBookPro13,3> <Mac OS X;27.2;26B118> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
+ 
+ /// The URL-bag entries this crate uses.
+ const BAG_KEYS: [&str; 5] = [
