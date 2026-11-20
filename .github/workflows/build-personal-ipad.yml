@@ -8,6 +8,7 @@ on:
       - .github/workflows/build-personal-ipad.yml
       - install-on-ipad.patch
       - auth-503-hotfix.patch
+      - cert-management-ipad.patch
 
 permissions:
   contents: read
@@ -59,6 +60,8 @@ jobs:
           git -C "$RUNNER_TEMP/sideinstaller" apply "$GITHUB_WORKSPACE/install-on-ipad.patch"
           git -C "$RUNNER_TEMP/sideinstaller" apply --check "$GITHUB_WORKSPACE/auth-503-hotfix.patch"
           git -C "$RUNNER_TEMP/sideinstaller" apply "$GITHUB_WORKSPACE/auth-503-hotfix.patch"
+          git -C "$RUNNER_TEMP/sideinstaller" apply --check "$GITHUB_WORKSPACE/cert-management-ipad.patch"
+          git -C "$RUNNER_TEMP/sideinstaller" apply "$GITHUB_WORKSPACE/cert-management-ipad.patch"
           rm -rf "$RUNNER_TEMP/sideinstaller/.github/workflows"
           git -C "$RUNNER_TEMP/sideinstaller" add -A
           git -C "$RUNNER_TEMP/sideinstaller" -c user.name='Actions' -c user.email='actions@users.noreply.github.com' commit -m 'Apply Install on iPad source changes'
@@ -72,7 +75,7 @@ jobs:
         env:
           PERSONAL_IPAD_INSTALLER: "1"
           BUNDLE_ID: com.personaltools.installonipad
-          VERSION: "1.1.2"
+          VERSION: "1.1.3"
           BUILD_NUMBER: ${{ github.run_number }}
           OUTPUT: ${{ runner.temp }}/Install-on-iPad.ipa
         working-directory: ${{ runner.temp }}/sideinstaller
