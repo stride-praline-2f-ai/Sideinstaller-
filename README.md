@@ -23,3 +23,13 @@ The Install on iPad screen now exposes **Manage signing certificates**. It opens
 **Suggested flow for error 7460:** first check whether you can reuse the existing certificate by importing it from SideStore. If that isn't possible, open Manage signing certificates, load the list, identify the certificate and consider which other apps use it. Revoke it only if you accept that apps signed with that certificate, including on other devices, may stop launching. Close the certificate tool and press **Install on iPad** again. The normal installation pipeline will request a new certificate after revocation. It does not issue one as a side effect of opening the tool. Your saved iPad pairing is not changed.
 
 The new screen reuses the upstream Rust `si_cert_signin`, `si_cert_list` and `si_cert_revoke` functions, rather than implementing certificate revocation independently. It also shows authentication and portal errors inline in the dedicated build, whose root otherwise does not display the standard SideInstaller certificate popups. Source changes are in [cert-management-ipad.patch](cert-management-ipad.patch).
+
+## v1.1.4: Persistent developer sessions and safer -22410 handling
+
+The dedicated **Install on iPad** screen now includes **Apple sign-in settings**, which opens the existing SideInstaller settings (including **Anisette Server**). For an Apple `-22410` rejection at GrandSlam's initial login, the app stops rather than trying the same Apple account against all seven servers. Choose one Mac-ADI anisette server manually with Auto disabled if investigating the error; a different server cannot guarantee that Apple accepts the account/device identity.
+
+For **Apple Accounts saved on this iPhone**, Side by Side now passes `remember_session=1` to `si_apple_signin` and uses its persistent `PrivateStore.isideload` storage. This activates the Rust FFI's existing token reuse across app launches and avoids unnecessary new GrandSlam logins while Apple still accepts the token. **Other people's accounts** continue to pass `remember_session=0` with a temporary directory, and no sessions or credentials are saved to the owner's persistent store.
+
+**Important:** This improves persistence and error handling, but it does not bypass Apple's current `-22410` server-side rejection if the user has no previously saved valid token. Do not revoke signing certificates to fix an initial-login error; that would invalidate other installed apps and wouldn't help initial GrandSlam authentication.
+
+Source: [apple-session-reuse.patch](apple-session-reuse.patch).
