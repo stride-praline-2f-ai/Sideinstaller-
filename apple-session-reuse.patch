@@ -11,7 +11,7 @@ diff --git a/ios-app/SideBySideView.swift b/ios-app/SideBySideView.swift
                  }
                  if isSavedHere {
                      engine.anisetteSignedIn(anisette)
-@@ -1203,6 +1204,17 @@
+@@ -1203,5 +1204,14 @@
                      engine.log("Apple ID credentials rejected: \(failure)")
                      throw EngineError.message(Engine.credentialErrorMessage)
                  }
@@ -26,7 +26,7 @@ diff --git a/ios-app/SideBySideView.swift b/ios-app/SideBySideView.swift
 +                }
                  // Not logged in through an Android-ADI server (-80046).
                  if Engine.isAndroidADISkip(failure) {
-@@ -1275,8 +1287,9 @@
+@@ -1275,7 +1285,7 @@
      /// One sign-in attempt against a specific anisette server. Uses the machine
      /// name `SideInstaller`, so an existing certificate is recognized as reusable.
      private func performSignIn(id: String, pw: String, anisette: String, dir: String,
@@ -35,7 +35,7 @@ diff --git a/ios-app/SideBySideView.swift b/ios-app/SideBySideView.swift
          defer { engine.endTwoFactor(for: ticket) }
          engine.log("Apple ID sign-in for \(LogRedactor.maskAppleID(id)) via anisette \(Engine.oneLine(anisette)) …")
          var session: OpaquePointer?
-@@ -1284,9 +1297,10 @@
+@@ -1284,6 +1294,8 @@
          var summary: UnsafeMutablePointer<CChar>?
          var error: UnsafeMutablePointer<CChar>?
 -        // 0 = don't save the session: it may be someone else's Apple ID.
@@ -57,7 +57,7 @@ diff --git a/ios-app/PersonalIPadView.swift b/ios-app/PersonalIPadView.swift
  
      var body: some View {
          NavigationStack {
-@@ -51,6 +52,9 @@
+@@ -51,5 +52,8 @@
          .sheet(isPresented: $showingCertificates) {
              PersonalIPadCertificatesView()
          }
@@ -66,7 +66,7 @@ diff --git a/ios-app/PersonalIPadView.swift b/ios-app/PersonalIPadView.swift
 +        }
          .sheet(isPresented: Binding(
              get: { engine.twoFactor != nil },
-@@ -139,6 +143,13 @@
+@@ -139,5 +143,12 @@
                  Label("Manage signing certificates", systemImage: "checkmark.seal")
              }
              .buttonStyle(SecondaryButtonStyle())
