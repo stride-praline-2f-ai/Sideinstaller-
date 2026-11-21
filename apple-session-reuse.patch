@@ -1,0 +1,81 @@
+diff --git a/ios-app/SideBySideView.swift b/ios-app/SideBySideView.swift
+--- a/ios-app/SideBySideView.swift
++++ b/ios-app/SideBySideView.swift
+@@ -1170,7 +1170,8 @@
+             }
+             do {
+                 let summary = try await onSignQueue {
+-                    try self.performSignIn(id: id, pw: pw, anisette: anisette, dir: dir, ticket: ticket)
++                    try self.performSignIn(id: id, pw: pw, anisette: anisette, dir: dir,
++                                           rememberSession: isSavedHere, ticket: ticket)
+                 }
+                 if isSavedHere {
+                     engine.anisetteSignedIn(anisette)
+@@ -1203,6 +1204,17 @@
+                     engine.log("Apple ID credentials rejected: \(failure)")
+                     throw EngineError.message(Engine.credentialErrorMessage)
+                 }
++                // The initial GrandSlam device-identity rejection happens before
++                // passwords are checked. More automatic attempts with the same
++                // device identity can trigger rate limits. Keep the selected
++                // anisette identity and let the user change one server manually.
++                if failure.contains("-22410") &&
++                   failure.contains("GrandSlam error during initial login request") {
++                    engine.log("Side by Side: Apple rejected sign-in device identity (-22410), stopping without cycling through more servers.")
++                    throw EngineError.message("Apple rejected the sign-in device identity (-22410) before checking the password. This is not a certificate or iPad pairing problem. In Apple sign-in settings, disable automatic anisette switching and select one Mac anisette server. Avoid repeated attempts; if Apple keeps rejecting the identity, try again later.")
++                }
+                 // Not logged in through an Android-ADI server (-80046).
+                 if Engine.isAndroidADISkip(failure) {
+@@ -1275,8 +1287,9 @@
+     /// One sign-in attempt against a specific anisette server. Uses the machine
+     /// name `SideInstaller`, so an existing certificate is recognized as reusable.
+     private func performSignIn(id: String, pw: String, anisette: String, dir: String,
+-                               ticket: AppleSignInTicket) throws -> String {
++                               rememberSession: Bool, ticket: AppleSignInTicket) throws -> String {
+         defer { engine.endTwoFactor(for: ticket) }
+         engine.log("Apple ID sign-in for \(LogRedactor.maskAppleID(id)) via anisette \(Engine.oneLine(anisette)) …")
+         var session: OpaquePointer?
+@@ -1284,9 +1297,10 @@
+         var summary: UnsafeMutablePointer<CChar>?
+         var error: UnsafeMutablePointer<CChar>?
+-        // 0 = don't save the session: it may be someone else's Apple ID.
+-        let rc = si_apple_signin(id, pw, anisette, "SideInstaller", dir, 0,
++        // Save and reuse developer sessions only for an Apple ID already saved
++        // on this iPhone. Never persist sessions for another person's account.
++        let rc = si_apple_signin(id, pw, anisette, "SideInstaller", dir,
++                                 rememberSession ? 1 : 0,
+                                  appleSignInTwoFactorCallback, ticket.context,
+                                  &session, &summary, &error)
+diff --git a/ios-app/PersonalIPadView.swift b/ios-app/PersonalIPadView.swift
+--- a/ios-app/PersonalIPadView.swift
++++ b/ios-app/PersonalIPadView.swift
+@@ -10,6 +10,7 @@
+     @State private var editingAccount: AccountEditorTarget?
+     @State private var shownTwoFactor: TwoFactorPhase?
+     @State private var showingCertificates = false
++    @State private var showingSignInSettings = false
+ 
+     var body: some View {
+         NavigationStack {
+@@ -51,6 +52,9 @@
+         .sheet(isPresented: $showingCertificates) {
+             PersonalIPadCertificatesView()
+         }
++        .sheet(isPresented: $showingSignInSettings) {
++            SettingsView()
++        }
+         .sheet(isPresented: Binding(
+             get: { engine.twoFactor != nil },
+@@ -139,6 +143,13 @@
+                 Label("Manage signing certificates", systemImage: "checkmark.seal")
+             }
+             .buttonStyle(SecondaryButtonStyle())
++
++            Button {
++                showingSignInSettings = true
++            } label: {
++                Label("Apple sign-in settings", systemImage: "network.badge.shield.half.filled")
++            }
++            .buttonStyle(SecondaryButtonStyle())
+             if manager.customIPA != nil {
+                 Toggle("Request Increased Memory Limit", isOn: $manager.requestIncreasedMemory)
